@@ -1,2 +1,0 @@
-"""LifeNode application package."""
-

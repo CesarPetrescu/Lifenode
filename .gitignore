@@ -1,14 +1,10 @@
-.venv/
-__pycache__/
-*.pyc
-*.pyo
 .DS_Store
 .env
 
-data/*
-!data/drive/
-!data/.gitkeep
-!data/drive/.gitkeep
+backend/target/
 
-models/*
-!models/.gitkeep
+frontend/node_modules/
+frontend/dist/
+
+user-files/*
+!user-files/.gitkeep

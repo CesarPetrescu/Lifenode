@@ -1,10 +1,7 @@
-.PHONY: up down logs build rebuild dev
+.PHONY: build up down logs backend-check frontend-build backend-dev frontend-dev
 
 build:
 	docker compose build
-
-rebuild:
-	docker compose build --no-cache
 
 up:
 	docker compose up -d
@@ -15,6 +12,15 @@ down:
 logs:
 	docker compose logs -f
 
-dev:
-	uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+backend-check:
+	cd backend && cargo check
+
+frontend-build:
+	cd frontend && npm run build
+
+backend-dev:
+	cd backend && cargo run
+
+frontend-dev:
+	cd frontend && npm run dev -- --host
 
