@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+
+FROM debian:bookworm-slim AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+
+WORKDIR /src/llama.cpp
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON && \
+    cmake --build build --config Release --target llama-server -j"$(nproc)"
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libgomp1 \
+    libc-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=builder /src/llama.cpp/build/bin/libggml*.so* /usr/local/lib/
+COPY --from=builder /src/llama.cpp/build/bin/libllama*.so* /usr/local/lib/
+COPY --from=builder /src/llama.cpp/build/bin/libmtmd*.so* /usr/local/lib/
+RUN ldconfig
+
+EXPOSE 8080
+ENTRYPOINT ["llama-server"]

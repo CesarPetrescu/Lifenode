@@ -4,35 +4,39 @@ LifeNode is a local-first Raspberry Pi web app with:
 
 - Rust backend (`axum` + `sqlx` + SQLite)
 - React frontend (`Vite` + `MUI`)
-- Per-user local storage under `./user-files/<username>/...`
+- `llama.cpp` for embeddings and Qwen chat inference
+- Per-user local storage in `./user-files/<username>/...`
 
-It includes:
+## Features
 
 - Wikipedia download + indexing
-- Semantic search over indexed chunks
-- Retrieval-based Q&A endpoint
+- Semantic search (embeddings via `llama.cpp`)
+- Q&A over retrieved context (Qwen via `llama.cpp`)
 - Calendar events
 - Notes
 - File upload/download per user
 
 ## Storage Model
 
-SQLite DB is local-only and lives at:
+- SQLite DB: `./user-files/lifenode.db`
+- User uploads: `./user-files/<username>/files`
+- Cached wiki text: `./user-files/<username>/wiki`
 
-- `/data/user-files/lifenode.db` in Docker
-- configurable by `LIFENODE_DB_PATH`
+## Models
 
-Per-user filesystem data goes to:
+Put your GGUF files in `./models`:
 
-- `./user-files/<username>/files` for uploaded files
-- `./user-files/<username>/wiki` for cached article text
+- `Qwen3.5-0.8B-UD-Q3_K_XL.gguf`
+- `embeddinggemma-300M-Q8_0.gguf`
+
+You can change paths in `.env`.
 
 ## Run With Docker
 
 ```bash
 cd LifeNode
 cp .env.example .env
-mkdir -p user-files
+mkdir -p user-files models
 docker compose build
 docker compose up -d
 docker compose logs -f
@@ -75,6 +79,17 @@ export VITE_API_BASE=http://<backend-host>:8000/api
 - `LIFENODE_FRONTEND_DIST` default `/app/frontend/dist`
 - `LIFENODE_MAX_UPLOAD_MB` default `100`
 - `LIFENODE_CORS_ORIGINS` default `*`
+- `LIFENODE_LLAMACPP_EMBED_URL` default `http://llama-embed:8080/v1/embeddings`
+- `LIFENODE_LLAMACPP_EMBED_MODEL` default `embeddinggemma-300M-Q8_0.gguf`
+- `LIFENODE_LLAMACPP_CHAT_URL` default `http://llama-qwen:8080/v1/chat/completions`
+- `LIFENODE_LLAMACPP_CHAT_MODEL` default `Qwen3.5-0.8B-UD-Q3_K_XL.gguf`
+- `LIFENODE_LLAMACPP_CHAT_TEMPERATURE` default `0.2`
+- `LIFENODE_LLAMACPP_CHAT_MAX_TOKENS` default `320`
+
+If llama services are unavailable, backend falls back to:
+
+- deterministic hash embeddings
+- retrieval-only answer formatting
 
 ## API Summary
 

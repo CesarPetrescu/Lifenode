@@ -28,11 +28,11 @@ use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use urlencoding::encode;
 
-const EMBEDDING_DIM: usize = 384;
+const HASH_EMBEDDING_DIM: usize = 384;
 const DEFAULT_TOP_K: u32 = 4;
 
 #[derive(Clone)]
@@ -42,6 +42,24 @@ struct AppState {
     user_files_dir: PathBuf,
     wiki_lang: String,
     max_upload_bytes: usize,
+    llama_embedding: Option<LlamaEmbeddingConfig>,
+    llama_chat: Option<LlamaChatConfig>,
+}
+
+#[derive(Clone)]
+struct LlamaEmbeddingConfig {
+    url: String,
+    model: Option<String>,
+    api_key: Option<String>,
+}
+
+#[derive(Clone)]
+struct LlamaChatConfig {
+    url: String,
+    model: Option<String>,
+    api_key: Option<String>,
+    temperature: f32,
+    max_tokens: u32,
 }
 
 #[derive(Debug)]
@@ -148,6 +166,17 @@ struct WikipediaArticle {
     content: String,
 }
 
+#[derive(Deserialize)]
+struct LlamaEmbeddingResponse {
+    data: Vec<LlamaEmbeddingItem>,
+}
+
+#[derive(Deserialize)]
+struct LlamaEmbeddingItem {
+    index: usize,
+    embedding: Vec<f32>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -179,6 +208,25 @@ async fn main() -> anyhow::Result<()> {
     let max_upload_bytes = max_upload_mb * 1024 * 1024;
     let cors_origins_raw =
         std::env::var("LIFENODE_CORS_ORIGINS").unwrap_or_else(|_| "*".to_string());
+    let llama_embed_url = std::env::var("LIFENODE_LLAMACPP_EMBED_URL")
+        .unwrap_or_else(|_| "http://llama-embed:8080/v1/embeddings".to_string());
+    let llama_embed_model = std::env::var("LIFENODE_LLAMACPP_EMBED_MODEL")
+        .unwrap_or_else(|_| "embeddinggemma-300M-Q8_0.gguf".to_string());
+    let llama_chat_url = std::env::var("LIFENODE_LLAMACPP_CHAT_URL")
+        .unwrap_or_else(|_| "http://llama-qwen:8080/v1/chat/completions".to_string());
+    let llama_chat_model = std::env::var("LIFENODE_LLAMACPP_CHAT_MODEL")
+        .unwrap_or_else(|_| "Qwen3.5-0.8B-UD-Q3_K_XL.gguf".to_string());
+    let llama_api_key = std::env::var("LIFENODE_LLAMACPP_API_KEY")
+        .ok()
+        .and_then(|v| non_empty(v));
+    let llama_chat_temperature: f32 = std::env::var("LIFENODE_LLAMACPP_CHAT_TEMPERATURE")
+        .unwrap_or_else(|_| "0.2".to_string())
+        .parse()
+        .context("LIFENODE_LLAMACPP_CHAT_TEMPERATURE must be a float")?;
+    let llama_chat_max_tokens: u32 = std::env::var("LIFENODE_LLAMACPP_CHAT_MAX_TOKENS")
+        .unwrap_or_else(|_| "320".to_string())
+        .parse()
+        .context("LIFENODE_LLAMACPP_CHAT_MAX_TOKENS must be an integer")?;
 
     tokio::fs::create_dir_all(&user_files_dir).await?;
 
@@ -198,6 +246,38 @@ async fn main() -> anyhow::Result<()> {
 
     init_db(&db).await?;
 
+    let llama_embedding = if llama_embed_url.trim().is_empty() {
+        None
+    } else {
+        Some(LlamaEmbeddingConfig {
+            url: llama_embed_url.clone(),
+            model: non_empty(llama_embed_model),
+            api_key: llama_api_key.clone(),
+        })
+    };
+    let llama_chat = if llama_chat_url.trim().is_empty() {
+        None
+    } else {
+        Some(LlamaChatConfig {
+            url: llama_chat_url.clone(),
+            model: non_empty(llama_chat_model),
+            api_key: llama_api_key,
+            temperature: llama_chat_temperature,
+            max_tokens: llama_chat_max_tokens,
+        })
+    };
+
+    if let Some(cfg) = &llama_embedding {
+        info!("llama.cpp embeddings enabled at {}", cfg.url);
+    } else {
+        warn!("llama.cpp embeddings disabled, using hash fallback embeddings");
+    }
+    if let Some(cfg) = &llama_chat {
+        info!("llama.cpp chat enabled at {}", cfg.url);
+    } else {
+        warn!("llama.cpp chat disabled, using retrieval-only fallback answers");
+    }
+
     let state = AppState {
         db,
         http_client: Client::builder()
@@ -207,6 +287,8 @@ async fn main() -> anyhow::Result<()> {
         user_files_dir,
         wiki_lang,
         max_upload_bytes,
+        llama_embedding,
+        llama_chat,
     };
 
     let cors = build_cors(&cors_origins_raw)?;
@@ -344,10 +426,22 @@ async fn root_message() -> impl IntoResponse {
     }))
 }
 
-async fn health() -> impl IntoResponse {
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    let embedding_backend = if state.llama_embedding.is_some() {
+        "llama.cpp"
+    } else {
+        "hash-fallback"
+    };
+    let llm_backend = if state.llama_chat.is_some() {
+        "llama.cpp"
+    } else {
+        "retrieval-fallback"
+    };
     Json(json!({
         "status": "ok",
         "time": Utc::now().to_rfc3339(),
+        "embedding_backend": embedding_backend,
+        "llm_backend": llm_backend,
     }))
 }
 
@@ -368,10 +462,7 @@ async fn wiki_download(
 
     let article = fetch_wikipedia_article(&state.http_client, title, lang).await?;
     let chunks = chunk_text(&article.content, 900, 150);
-    let embeddings: Vec<Vec<f32>> = chunks
-        .iter()
-        .map(|chunk| hash_embedding(chunk, EMBEDDING_DIM))
-        .collect();
+    let embeddings = embed_texts_with_fallback(&state, &chunks).await;
 
     let mut tx = state.db.begin().await.map_err(internal_error)?;
 
@@ -484,7 +575,7 @@ async fn semantic_search(
     }
     let top_k = payload.top_k.unwrap_or(DEFAULT_TOP_K).clamp(1, 20) as usize;
 
-    let ranked = rank_chunks(&state.db, &username, query, top_k).await?;
+    let ranked = rank_chunks(&state, &username, query, top_k).await?;
     Ok(Json(json!({
         "username": username,
         "query": query,
@@ -506,27 +597,8 @@ async fn ask_question(
     }
     let top_k = payload.top_k.unwrap_or(DEFAULT_TOP_K).clamp(1, 20) as usize;
 
-    let ranked = rank_chunks(&state.db, &username, question, top_k).await?;
-    let answer = if ranked.is_empty() {
-        "No indexed Wikipedia context found for this user yet.".to_string()
-    } else {
-        let mut text =
-            String::from("Retrieval-based answer (LLM not wired in this Rust build yet):\n\n");
-        for (idx, item) in ranked.iter().take(3).enumerate() {
-            let excerpt = trim_to_chars(&item.text, 420);
-            text.push_str(&format!(
-                "{}. {} [chunk {} | score {:.4}]\n{}\n\n",
-                idx + 1,
-                item.title,
-                item.chunk_index,
-                item.score,
-                excerpt
-            ));
-        }
-        text.push_str("Question: ");
-        text.push_str(question);
-        text
-    };
+    let ranked = rank_chunks(&state, &username, question, top_k).await?;
+    let answer = generate_answer_with_fallback(&state, question, &ranked).await;
 
     Ok(Json(json!({
         "username": username,
@@ -824,7 +896,7 @@ async fn delete_file(
 }
 
 async fn rank_chunks(
-    db: &SqlitePool,
+    state: &AppState,
     username: &str,
     query: &str,
     top_k: usize,
@@ -836,11 +908,11 @@ async fn rank_chunks(
          WHERE c.username = ?",
     )
     .bind(username)
-    .fetch_all(db)
+    .fetch_all(&state.db)
     .await
     .map_err(internal_error)?;
 
-    let query_embedding = hash_embedding(query, EMBEDDING_DIM);
+    let query_embedding = embed_single_with_fallback(state, query).await;
     let mut scored = Vec::new();
 
     for row in rows {
@@ -861,6 +933,212 @@ async fn rank_chunks(
         scored.truncate(top_k);
     }
     Ok(scored)
+}
+
+async fn embed_texts_with_fallback(state: &AppState, texts: &[String]) -> Vec<Vec<f32>> {
+    if texts.is_empty() {
+        return Vec::new();
+    }
+
+    if let Some(cfg) = &state.llama_embedding {
+        match embed_with_llama_cpp(&state.http_client, cfg, texts).await {
+            Ok(vectors) if vectors.len() == texts.len() => {
+                return vectors;
+            }
+            Ok(vectors) => {
+                warn!(
+                    "llama.cpp embedding count mismatch (got {}, expected {}), using hash fallback",
+                    vectors.len(),
+                    texts.len()
+                );
+            }
+            Err(err) => {
+                warn!("llama.cpp embeddings failed, using hash fallback: {err}");
+            }
+        }
+    }
+
+    texts
+        .iter()
+        .map(|text| hash_embedding(text, HASH_EMBEDDING_DIM))
+        .collect()
+}
+
+async fn embed_single_with_fallback(state: &AppState, text: &str) -> Vec<f32> {
+    let inputs = vec![text.to_string()];
+    embed_texts_with_fallback(state, &inputs)
+        .await
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| hash_embedding(text, HASH_EMBEDDING_DIM))
+}
+
+async fn embed_with_llama_cpp(
+    client: &Client,
+    cfg: &LlamaEmbeddingConfig,
+    texts: &[String],
+) -> Result<Vec<Vec<f32>>, String> {
+    let mut payload = json!({
+        "input": texts,
+    });
+    if let Some(model) = cfg.model.as_ref() {
+        payload["model"] = json!(model);
+    }
+
+    let mut request = client.post(&cfg.url).json(&payload);
+    if let Some(api_key) = cfg.api_key.as_ref() {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| err.to_string())?
+        .error_for_status()
+        .map_err(|err| err.to_string())?;
+
+    let mut parsed: LlamaEmbeddingResponse =
+        response.json().await.map_err(|err| err.to_string())?;
+    if parsed.data.is_empty() {
+        return Err("llama.cpp embeddings response contained no vectors".to_string());
+    }
+    parsed.data.sort_by_key(|item| item.index);
+
+    let vectors: Vec<Vec<f32>> = parsed.data.into_iter().map(|item| item.embedding).collect();
+    if vectors.iter().any(|vector| vector.is_empty()) {
+        return Err("llama.cpp returned at least one empty embedding vector".to_string());
+    }
+    Ok(vectors)
+}
+
+async fn generate_answer_with_fallback(
+    state: &AppState,
+    question: &str,
+    contexts: &[SearchResultItem],
+) -> String {
+    if contexts.is_empty() {
+        return "No indexed Wikipedia context found for this user yet.".to_string();
+    }
+
+    if let Some(cfg) = &state.llama_chat {
+        match chat_with_llama_cpp(&state.http_client, cfg, question, contexts).await {
+            Ok(answer) => {
+                let trimmed = answer.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+                warn!("llama.cpp chat returned an empty answer, using retrieval fallback");
+            }
+            Err(err) => {
+                warn!("llama.cpp chat failed, using retrieval fallback: {err}");
+            }
+        }
+    }
+
+    retrieval_answer_fallback(question, contexts)
+}
+
+async fn chat_with_llama_cpp(
+    client: &Client,
+    cfg: &LlamaChatConfig,
+    question: &str,
+    contexts: &[SearchResultItem],
+) -> Result<String, String> {
+    let context_block = contexts
+        .iter()
+        .take(5)
+        .map(|ctx| {
+            format!(
+                "[{} | chunk {} | score {:.4}]\n{}",
+                ctx.title,
+                ctx.chunk_index,
+                ctx.score,
+                trim_to_chars(&ctx.text, 700)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let system_prompt = "You are LifeNode local assistant. Use only the provided context. If the answer is not present in context, explicitly say you do not know.";
+    let user_prompt = format!(
+        "Question:\n{}\n\nContext:\n{}\n\nAnswer concisely and cite relevant context points.",
+        question, context_block
+    );
+
+    let mut payload = json!({
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": cfg.temperature,
+        "max_tokens": cfg.max_tokens,
+        "stream": false
+    });
+    if let Some(model) = cfg.model.as_ref() {
+        payload["model"] = json!(model);
+    }
+
+    let mut request = client.post(&cfg.url).json(&payload);
+    if let Some(api_key) = cfg.api_key.as_ref() {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| err.to_string())?
+        .error_for_status()
+        .map_err(|err| err.to_string())?;
+
+    let value: Value = response.json().await.map_err(|err| err.to_string())?;
+    extract_chat_content(&value)
+        .ok_or_else(|| "could not parse llama.cpp chat completion content".to_string())
+}
+
+fn extract_chat_content(value: &Value) -> Option<String> {
+    let content = value
+        .get("choices")
+        .and_then(|v| v.get(0))
+        .and_then(|v| v.get("message"))
+        .and_then(|v| v.get("content"))?;
+
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+
+    if let Some(items) = content.as_array() {
+        let mut chunks = Vec::new();
+        for item in items {
+            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                chunks.push(text.to_string());
+            } else if let Some(text) = item.as_str() {
+                chunks.push(text.to_string());
+            }
+        }
+        if !chunks.is_empty() {
+            return Some(chunks.join(""));
+        }
+    }
+
+    None
+}
+
+fn retrieval_answer_fallback(question: &str, contexts: &[SearchResultItem]) -> String {
+    let mut text = String::from("Retrieval fallback answer:\n\n");
+    for (idx, item) in contexts.iter().take(3).enumerate() {
+        let excerpt = trim_to_chars(&item.text, 420);
+        text.push_str(&format!(
+            "{}. {} [chunk {} | score {:.4}]\n{}\n\n",
+            idx + 1,
+            item.title,
+            item.chunk_index,
+            item.score,
+            excerpt
+        ));
+    }
+    text.push_str("Question: ");
+    text.push_str(question);
+    text
 }
 
 async fn fetch_wikipedia_article(
@@ -1115,6 +1393,15 @@ fn trim_to_chars(input: &str, max_chars: usize) -> String {
         return input.to_string();
     }
     input.chars().take(max_chars).collect::<String>() + "..."
+}
+
+fn non_empty(input: String) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn bad_request<E: std::fmt::Display>(err: E) -> AppError {

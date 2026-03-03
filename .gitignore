@@ -6,5 +6,8 @@ backend/target/
 frontend/node_modules/
 frontend/dist/
 
+models/*
+!models/.gitkeep
+
 user-files/*
 !user-files/.gitkeep

@@ -5,9 +5,51 @@ services:
       dockerfile: Dockerfile
     user: "0:0"
     restart: unless-stopped
+    depends_on:
+      - llama-qwen
+      - llama-embed
     env_file:
       - .env
     ports:
       - "${LIFENODE_PORT:-8000}:8000"
     volumes:
       - ./user-files:/data/user-files
+
+  llama-qwen:
+    build:
+      context: .
+      dockerfile: Dockerfile.llama-cpp
+    restart: unless-stopped
+    command:
+      - -m
+      - ${LLAMACPP_QWEN_MODEL_PATH:-/models/Qwen3.5-0.8B-UD-Q3_K_XL.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - ${LLAMACPP_QWEN_CTX:-4096}
+      - -ngl
+      - ${LLAMACPP_NGL:-0}
+    volumes:
+      - ./models:/models:ro
+
+  llama-embed:
+    build:
+      context: .
+      dockerfile: Dockerfile.llama-cpp
+    restart: unless-stopped
+    command:
+      - -m
+      - ${LLAMACPP_EMBED_MODEL_PATH:-/models/embeddinggemma-300M-Q8_0.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --embeddings
+      - -c
+      - ${LLAMACPP_EMBED_CTX:-2048}
+      - -ngl
+      - ${LLAMACPP_NGL:-0}
+    volumes:
+      - ./models:/models:ro
