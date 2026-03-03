@@ -3,9 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+.env
 
 data/*
 !data/drive/
 !data/.gitkeep
 !data/drive/.gitkeep
 
+models/*
+!models/.gitkeep

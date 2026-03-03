@@ -2,6 +2,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import logging
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +30,20 @@ DB_PATH = Path(os.getenv("LIFENODE_DB_PATH", str(DATA_DIR / "lifenode.db"))).res
 WIKI_LANG = os.getenv("LIFENODE_WIKI_LANG", "en")
 LLM_MODEL_PATH = os.getenv("LIFENODE_LLM_MODEL_PATH")
 EMBED_MODEL_PATH = os.getenv("LIFENODE_EMBED_MODEL_PATH")
+LOG_LEVEL = os.getenv("LIFENODE_LOG_LEVEL", "INFO").upper()
+CORS_ORIGINS_RAW = os.getenv("LIFENODE_CORS_ORIGINS", "*")
+MAX_UPLOAD_MB = int(os.getenv("LIFENODE_MAX_UPLOAD_MB", "100"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+CORS_ORIGINS = ["*"] if CORS_ORIGINS_RAW.strip() == "*" else [
+    item.strip() for item in CORS_ORIGINS_RAW.split(",") if item.strip()
+]
 
+
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("lifenode")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DRIVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,7 +54,7 @@ llm_service = LocalLlmService(LLM_MODEL_PATH)
 app = FastAPI(title="LifeNode", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS or ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -51,6 +65,18 @@ note_clients: set[WebSocket] = set()
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+@app.on_event("startup")
+def startup_log() -> None:
+    logger.info(
+        "LifeNode started (db=%s, drive=%s, wiki_lang=%s, embed=%s, llm=%s)",
+        DB_PATH,
+        DRIVE_DIR,
+        WIKI_LANG,
+        embedding_service.backend,
+        llm_service.backend,
+    )
 
 
 def _safe_drive_path(filename: str) -> Path:
@@ -207,9 +233,27 @@ def delete_event(event_id: int) -> dict[str, Any]:
 @app.post("/api/drive/upload")
 async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
     target = _safe_drive_path(file.filename or "")
-    content = await file.read()
-    target.write_bytes(content)
-    return {"filename": target.name, "size": len(content)}
+    total_size = 0
+
+    try:
+        with target.open("wb") as destination:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_BYTES:
+                    destination.close()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Max upload is {MAX_UPLOAD_MB} MB.",
+                    )
+                destination.write(chunk)
+    finally:
+        await file.close()
+
+    return {"filename": target.name, "size": total_size}
 
 
 @app.get("/api/drive/files")
@@ -243,4 +287,3 @@ def delete_file(filename: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="File not found")
     target.unlink()
     return {"deleted": True}
-

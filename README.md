@@ -2,7 +2,7 @@
 
 Offline-first Raspberry Pi web hub: download Wikipedia, run local semantic search + LLM Q&A, plus calendar, live-synced notes, and a lightweight file drive.
 
-## What It Includes
+## Features
 
 - Wikipedia downloader and local storage
 - Semantic search over indexed Wikipedia chunks
@@ -21,7 +21,41 @@ Offline-first Raspberry Pi web hub: download Wikipedia, run local semantic searc
 - GGUF file target: `embeddinggemma-300M-Q8_0.gguf`
 - Embedding GGUF page: <https://huggingface.co/unsloth/embeddinggemma-300m-GGUF?show_file_info=embeddinggemma-300M-Q8_0.gguf>
 
-## Quick Start
+## Docker Deploy (Recommended)
+
+```bash
+cd LifeNode
+cp .env.example .env
+mkdir -p models
+
+# Put your GGUF files in ./models
+# models/Qwen3.5-0.8B-UD-Q3_K_XL.gguf
+# models/embeddinggemma-300M-Q8_0.gguf
+
+docker compose build
+docker compose up -d
+docker compose logs -f
+```
+
+Open `http://<rpi-ip>:8000`.
+
+### Docker Notes
+
+- Persistent data is stored in the Docker volume `lifenode_data`.
+- Models are loaded from `./models` on the host (read-only mount).
+- The app runs as a non-root user in the container.
+- Healthcheck is enabled (`/api/health`).
+
+If `llama-cpp-python` build is too heavy for your Pi, build without LLM backend:
+
+```bash
+INSTALL_LLM_BACKEND=0 docker compose build --no-cache
+docker compose up -d
+```
+
+In that mode, retrieval still works and `/api/ask` uses fallback answer formatting.
+
+## Local Dev (No Docker)
 
 ```bash
 cd LifeNode
@@ -29,14 +63,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Optional model paths (recommended on Raspberry Pi)
-export LIFENODE_LLM_MODEL_PATH=/path/to/Qwen3.5-0.8B-UD-Q3_K_XL.gguf
-export LIFENODE_EMBED_MODEL_PATH=/path/to/embeddinggemma-300M-Q8_0.gguf
+# Optional local model paths
+export LIFENODE_LLM_MODEL_PATH=/absolute/path/Qwen3.5-0.8B-UD-Q3_K_XL.gguf
+export LIFENODE_EMBED_MODEL_PATH=/absolute/path/embeddinggemma-300M-Q8_0.gguf
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-
-Open `http://<rpi-ip>:8000` from your browser.
 
 ## Environment Variables
 
@@ -46,6 +78,9 @@ Open `http://<rpi-ip>:8000` from your browser.
 - `LIFENODE_WIKI_LANG` (default: `en`)
 - `LIFENODE_LLM_MODEL_PATH` (optional)
 - `LIFENODE_EMBED_MODEL_PATH` (optional)
+- `LIFENODE_MAX_UPLOAD_MB` (default: `100`)
+- `LIFENODE_CORS_ORIGINS` (default: `*`)
+- `LIFENODE_LOG_LEVEL` (default: `INFO`)
 
 If model paths are not set or model loading fails, LifeNode still works with fallback retrieval behavior:
 - embeddings use a deterministic hash embedding fallback
@@ -64,4 +99,3 @@ If model paths are not set or model loading fails, LifeNode still works with fal
 - `GET /api/drive/files` list files
 - `GET /api/drive/download/{filename}` download file
 - `DELETE /api/drive/files/{filename}` delete file
-

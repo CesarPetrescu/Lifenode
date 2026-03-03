@@ -2,5 +2,3 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 requests>=2.32
 python-multipart>=0.0.9
-llama-cpp-python>=0.2.90
-
