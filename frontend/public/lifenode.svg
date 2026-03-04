@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="LifeNode">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1d3a"/>
+      <stop offset="100%" stop-color="#1144cc"/>
+    </linearGradient>
+    <linearGradient id="node" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#a7f3d0"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <path d="M64 178V78h24v78h42v22H64zm62-61h24v61h-24v-61zm0-39h24v22h-24V78zm40 100V78h24v39h40v22h-40v39h-24z" fill="#e5efff"/>
+  <circle cx="138" cy="89" r="10" fill="url(#node)"/>
+  <circle cx="178" cy="129" r="10" fill="url(#node)"/>
+  <circle cx="216" cy="129" r="10" fill="url(#node)"/>
+  <circle cx="178" cy="167" r="10" fill="url(#node)"/>
+  <path d="M138 89l40 40m0 0h38m-38 0v38" stroke="#7dd3fc" stroke-width="6" stroke-linecap="round"/>
+</svg>

@@ -20,6 +20,8 @@ services:
       context: .
       dockerfile: Dockerfile.llama-cpp
     restart: unless-stopped
+    ulimits:
+      memlock: -1
     command:
       - -m
       - ${LLAMACPP_QWEN_MODEL_PATH:-/models/Qwen3.5-0.8B-UD-Q3_K_XL.gguf}
@@ -31,6 +33,8 @@ services:
       - ${LLAMACPP_QWEN_CTX:-4096}
       - -ngl
       - ${LLAMACPP_NGL:-0}
+      - --no-mmap
+      - --mlock
     volumes:
       - ./models:/models:ro
 
@@ -39,6 +43,8 @@ services:
       context: .
       dockerfile: Dockerfile.llama-cpp
     restart: unless-stopped
+    ulimits:
+      memlock: -1
     command:
       - -m
       - ${LLAMACPP_EMBED_MODEL_PATH:-/models/embeddinggemma-300M-Q8_0.gguf}
@@ -51,5 +57,30 @@ services:
       - ${LLAMACPP_EMBED_CTX:-2048}
       - -ngl
       - ${LLAMACPP_NGL:-0}
+      - --no-mmap
+      - --mlock
     volumes:
       - ./models:/models:ro
+
+  kiwix:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    user: "0:0"
+    restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        mkdir -p /data/user-files/maps/kiwix
+        while true; do
+          FILES="$$(ls -1 /data/user-files/maps/kiwix/*.zim 2>/dev/null || true)"
+          if [ -n "$$FILES" ]; then
+            exec kiwix-serve --address=0.0.0.0 --port=8080 $$FILES
+          fi
+          echo "kiwix: waiting for .zim files in /data/user-files/maps/kiwix"
+          sleep 15
+        done
+    ports:
+      - "${LIFENODE_KIWIX_PORT:-8081}:8080"
+    volumes:
+      - ./user-files:/data/user-files

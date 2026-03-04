@@ -3,3 +3,86 @@
 * {
   box-sizing: border-box;
 }
+
+html {
+  color-scheme: light dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  text-rendering: optimizeLegibility;
+}
+
+a,
+button,
+input,
+textarea,
+select,
+[role='button'] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(17, 68, 204, 0.16);
+}
+
+button,
+a,
+input,
+textarea,
+select,
+[tabindex]:not([tabindex='-1']) {
+  min-height: 24px;
+}
+
+@media (pointer: coarse) {
+  button,
+  a,
+  input,
+  textarea,
+  select,
+  [tabindex]:not([tabindex='-1']) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 900px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+:focus-visible {
+  outline: 3px solid rgba(17, 68, 204, 0.55);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: -56px;
+  z-index: 1800;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #1144cc;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.skip-link:focus-visible {
+  top: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
