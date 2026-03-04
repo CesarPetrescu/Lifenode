@@ -38,6 +38,7 @@ import RestoreIcon from '@mui/icons-material/Restore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import ConfirmDialog from './ConfirmDialog'
 import type {
   NoteFileDetail,
   NoteFileListItem,
@@ -88,6 +89,10 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
 
   const [renameFolderOpen, setRenameFolderOpen] = useState(false)
   const [renameFolderName, setRenameFolderName] = useState('')
+  const [confirmDeleteFolderOpen, setConfirmDeleteFolderOpen] = useState(false)
+  const [confirmDeleteFileOpen, setConfirmDeleteFileOpen] = useState(false)
+  const [deletingFolder, setDeletingFolder] = useState(false)
+  const [deletingFile, setDeletingFile] = useState(false)
 
   const folderById = useMemo(() => {
     const map = new Map<number, NoteFolder>()
@@ -297,7 +302,7 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
 
   const onDeleteFolder = async () => {
     if (!selectedFolder || !currentUsername || !token) return
-    if (!window.confirm(`Delete folder "${selectedFolder.name}" and all nested files/folders?`)) return
+    setDeletingFolder(true)
     try {
       setError('')
       await api(
@@ -308,15 +313,18 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
         },
       )
       setSelectedFolderId(null)
+      setConfirmDeleteFolderOpen(false)
       await loadTree(selectedFileId)
     } catch (err) {
       setError(errorMessage(err))
+    } finally {
+      setDeletingFolder(false)
     }
   }
 
   const onDeleteCurrentFile = async () => {
     if (!currentFile || !currentUsername || !token) return
-    if (!window.confirm(`Delete file "${currentFile.name}"?`)) return
+    setDeletingFile(true)
     try {
       setError('')
       await api(
@@ -328,9 +336,12 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
       )
       setCurrentFile(null)
       setSelectedFileId(null)
+      setConfirmDeleteFileOpen(false)
       await loadTree()
     } catch (err) {
       setError(errorMessage(err))
+    } finally {
+      setDeletingFile(false)
     }
   }
 
@@ -566,7 +577,7 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
                 variant="text"
                 startIcon={<DeleteIcon />}
                 disabled={!selectedFolder}
-                onClick={() => void onDeleteFolder()}
+                onClick={() => setConfirmDeleteFolderOpen(true)}
               >
                 Delete Folder
               </Button>
@@ -663,7 +674,8 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
                       color="error"
                       variant="outlined"
                       startIcon={<DeleteIcon />}
-                      onClick={() => void onDeleteCurrentFile()}
+                      onClick={() => setConfirmDeleteFileOpen(true)}
+                      disabled={deletingFile}
                     >
                       Delete
                     </Button>
@@ -854,6 +866,26 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
           </Button>
         </DialogActions>
       </Dialog>
+      <ConfirmDialog
+        open={confirmDeleteFolderOpen}
+        title="Delete Folder"
+        message={`Delete folder "${selectedFolder?.name ?? ''}" and all nested files/folders?`}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loading={deletingFolder}
+        onClose={() => setConfirmDeleteFolderOpen(false)}
+        onConfirm={() => void onDeleteFolder()}
+      />
+      <ConfirmDialog
+        open={confirmDeleteFileOpen}
+        title="Delete File"
+        message={`Delete file "${currentFile?.name ?? ''}"?`}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loading={deletingFile}
+        onClose={() => setConfirmDeleteFileOpen(false)}
+        onConfirm={() => void onDeleteCurrentFile()}
+      />
     </Paper>
   )
 }

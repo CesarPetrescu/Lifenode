@@ -36,7 +36,7 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord'
-import { ColorModeContext } from './main'
+import { ColorModeContext } from './themeContext'
 
 import type { AppSection, AuthResponse, AuthUser, HealthResponse } from './types'
 import { api, formatLocalDate } from './utils'

@@ -25,6 +25,7 @@ import CancelIcon from '@mui/icons-material/Cancel'
 import DeleteIcon from '@mui/icons-material/Delete'
 import MapIcon from '@mui/icons-material/Map'
 
+import ConfirmDialog from './ConfirmDialog'
 import type {
   MapDatasetPreset,
   MapDownloadJob,
@@ -36,6 +37,13 @@ import { api, authHeaders, formatLocalDate } from './utils'
 
 type OfflineSource = 'kiwix' | 'osm'
 type MapsSectionProps = SectionProps & { mode: OfflineSource }
+type ConfirmAction = {
+  title: string
+  message: string
+  confirmLabel: string
+  confirmColor?: 'primary' | 'error' | 'warning' | 'success' | 'info'
+  onConfirm: () => Promise<void> | void
+}
 type KiwixCatalogEntry = {
   id: string
   title: string
@@ -146,6 +154,8 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
   const [osmSelectedDatasetPath, setOsmSelectedDatasetPath] = useState('')
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null)
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null)
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
+  const [confirmLoading, setConfirmLoading] = useState(false)
 
   const sourceJobs = useMemo(() => jobs.filter((job) => job.source === mode), [jobs, mode])
   const sourceFiles = useMemo(() => files.filter((item) => item.source === mode), [files, mode])
@@ -211,59 +221,95 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
 
   const onStartPreset = async (preset: MapDatasetPreset) => {
     if (!currentUsername) return
-    try {
-      const inferredName = fileNameFromUrl(preset.url)
-      const existing = inferredName
-        ? sourceFiles.find((item) => item.name === inferredName)
-        : undefined
-      if (existing && !window.confirm(`"${existing.name}" already exists.\n\nRe-download and overwrite it?`)) {
-        return
-      }
-      if (!window.confirm(`Start download now?\n\n${preset.title}\nApprox size: ${preset.approx_size}`)) {
-        return
-      }
-      setError('')
-      await api<MapDownloadJob>(`/maps/jobs/${encodeURIComponent(currentUsername)}`, {
-        method: 'POST',
-        headers: authHeaders(token, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ preset_id: preset.id }),
-      })
-      await Promise.all([loadJobs(), loadFiles()])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
+    const inferredName = fileNameFromUrl(preset.url)
+    const existing = inferredName
+      ? sourceFiles.find((item) => item.name === inferredName)
+      : undefined
+    setConfirmAction({
+      title: existing ? 'Overwrite Existing File?' : 'Start Download?',
+      message: existing
+        ? `"${existing.name}" already exists.\n\nRe-download and overwrite it with:\n${preset.title}\nApprox size: ${preset.approx_size}`
+        : `Start download now?\n\n${preset.title}\nApprox size: ${preset.approx_size}`,
+      confirmLabel: existing ? 'Overwrite & Download' : 'Download',
+      confirmColor: existing ? 'warning' : 'primary',
+      onConfirm: async () => {
+        try {
+          setError('')
+          await api<MapDownloadJob>(`/maps/jobs/${encodeURIComponent(currentUsername)}`, {
+            method: 'POST',
+            headers: authHeaders(token, { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ preset_id: preset.id }),
+          })
+          await Promise.all([loadJobs(), loadFiles()])
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      },
+    })
   }
 
   const onStartCustom = async () => {
     if (!currentUsername || !customUrl.trim()) return
+    const requestedName = customFileName.trim() || fileNameFromUrl(customUrl.trim()) || ''
+    const existing = requestedName
+      ? sourceFiles.find((item) => item.name === requestedName)
+      : undefined
+    setConfirmAction({
+      title: existing ? 'Overwrite Existing File?' : 'Start Custom Download?',
+      message: existing
+        ? `"${existing.name}" already exists.\n\nRe-download and overwrite it from:\n${customUrl.trim()}`
+        : `Start custom download from:\n${customUrl.trim()}`,
+      confirmLabel: existing ? 'Overwrite & Download' : 'Start Download',
+      confirmColor: existing ? 'warning' : 'primary',
+      onConfirm: async () => {
+        try {
+          setError('')
+          await api<MapDownloadJob>(`/maps/jobs/${encodeURIComponent(currentUsername)}`, {
+            method: 'POST',
+            headers: authHeaders(token, { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              source: mode,
+              url: customUrl.trim(),
+              file_name: customFileName.trim() || undefined,
+              label: customLabel.trim() || undefined,
+            }),
+          })
+          setCustomUrl('')
+          setCustomFileName('')
+          setCustomLabel('')
+          await Promise.all([loadJobs(), loadFiles()])
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      },
+    })
+  }
+
+  const runConfirmAction = async () => {
+    if (!confirmAction) return
+    setConfirmLoading(true)
     try {
-      const requestedName = customFileName.trim() || fileNameFromUrl(customUrl.trim()) || ''
-      const existing = requestedName
-        ? sourceFiles.find((item) => item.name === requestedName)
-        : undefined
-      if (existing && !window.confirm(`"${existing.name}" already exists.\n\nRe-download and overwrite it?`)) {
-        return
-      }
-      if (!window.confirm(`Start custom download from:\n${customUrl.trim()}`)) {
-        return
-      }
+      await confirmAction.onConfirm()
+      setConfirmAction(null)
+    } finally {
+      setConfirmLoading(false)
+    }
+  }
+
+  const onDeleteJob = async (job: MapDownloadJob) => {
+    if (!currentUsername) return
+    try {
+      setDeletingJobId(job.id)
       setError('')
-      await api<MapDownloadJob>(`/maps/jobs/${encodeURIComponent(currentUsername)}`, {
-        method: 'POST',
-        headers: authHeaders(token, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          source: mode,
-          url: customUrl.trim(),
-          file_name: customFileName.trim() || undefined,
-          label: customLabel.trim() || undefined,
-        }),
+      await api<void>(`/maps/jobs/${encodeURIComponent(currentUsername)}/${job.id}`, {
+        method: 'DELETE',
+        headers: authHeaders(token),
       })
-      setCustomUrl('')
-      setCustomFileName('')
-      setCustomLabel('')
-      await Promise.all([loadJobs(), loadFiles()])
+      await loadJobs()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeletingJobId(null)
     }
   }
 
@@ -278,24 +324,6 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
       await loadJobs()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  const onDeleteJob = async (job: MapDownloadJob) => {
-    if (!currentUsername) return
-    if (!window.confirm(`Delete this download log entry?\n\n${job.label}`)) return
-    try {
-      setDeletingJobId(job.id)
-      setError('')
-      await api<void>(`/maps/jobs/${encodeURIComponent(currentUsername)}/${job.id}`, {
-        method: 'DELETE',
-        headers: authHeaders(token),
-      })
-      await loadJobs()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setDeletingJobId(null)
     }
   }
 
@@ -327,7 +355,6 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
 
   const onDeleteFile = async (item: MapFileItem) => {
     if (!currentUsername) return
-    if (!window.confirm(`Delete file "${item.name}"?`)) return
     try {
       setDeletingFilePath(item.path)
       setError('')
@@ -511,7 +538,7 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
                         size="small"
                         startIcon={<DownloadIcon />}
                         onClick={() => void onStartPreset(preset)}
-                        disabled={!!runningJob}
+                        disabled={!!runningJob || confirmLoading}
                       >
                         Download
                       </Button>
@@ -572,7 +599,7 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
             variant="outlined"
             startIcon={<DownloadIcon />}
             onClick={() => void onStartCustom()}
-            disabled={!customUrl.trim() || !!runningJob}
+            disabled={!customUrl.trim() || !!runningJob || confirmLoading}
           >
             Start Custom Download
           </Button>
@@ -670,7 +697,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
                           color="error"
                           variant="text"
                           startIcon={<DeleteIcon />}
-                          onClick={() => void onDeleteJob(job)}
+                          onClick={() =>
+                            setConfirmAction({
+                              title: 'Delete Download Log Entry',
+                              message: `Delete this download job log?\n\n${job.label}`,
+                              confirmLabel: 'Delete',
+                              confirmColor: 'error',
+                              onConfirm: async () => {
+                                await onDeleteJob(job)
+                              },
+                            })}
                           disabled={deletingJobId === job.id}
                         >
                           {deletingJobId === job.id ? 'Deleting…' : 'Delete'}
@@ -728,7 +764,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
                     color="error"
                     variant="text"
                     startIcon={<DeleteIcon />}
-                    onClick={() => void onDeleteFile(item)}
+                    onClick={() =>
+                      setConfirmAction({
+                        title: 'Delete Downloaded File',
+                        message: `Delete file "${item.name}"?`,
+                        confirmLabel: 'Delete',
+                        confirmColor: 'error',
+                        onConfirm: async () => {
+                          await onDeleteFile(item)
+                        },
+                      })}
                     disabled={deletingFilePath === item.path}
                   >
                     {deletingFilePath === item.path ? 'Deleting…' : 'Delete'}
@@ -965,6 +1010,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
           </Typography>
         </Paper>
       )}
+      <ConfirmDialog
+        open={confirmAction != null}
+        title={confirmAction?.title ?? 'Confirm Action'}
+        message={confirmAction?.message ?? ''}
+        confirmLabel={confirmAction?.confirmLabel ?? 'Confirm'}
+        confirmColor={confirmAction?.confirmColor ?? 'primary'}
+        loading={confirmLoading}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => void runConfirmAction()}
+      />
     </Stack>
   )
 }

@@ -1,18 +1,14 @@
-import { createContext, StrictMode, useEffect, useMemo, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { CssBaseline, ThemeProvider, createTheme } from '@mui/material'
 import App from './App.tsx'
+import { ColorModeContext, type ColorMode } from './themeContext'
 import './index.css'
 
-export const ColorModeContext = createContext({
-  toggleColorMode: () => {},
-  mode: 'light' as 'light' | 'dark',
-})
-
-function AppWithTheme() {
+export function AppWithTheme() {
   const stored = localStorage.getItem('lifenode_theme')
-  const initial: 'light' | 'dark' = stored === 'dark' ? 'dark' : 'light'
-  const [mode, setMode] = useState<'light' | 'dark'>(initial)
+  const initial: ColorMode = stored === 'dark' ? 'dark' : 'light'
+  const [mode, setMode] = useState<ColorMode>(initial)
 
   const colorMode = useMemo(
     () => ({

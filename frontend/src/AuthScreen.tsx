@@ -15,7 +15,7 @@ import {
 import { useTheme } from '@mui/material/styles'
 
 import type { AuthMode, AuthResponse } from './types'
-import { api, formatLocalDate } from './utils'
+import { api } from './utils'
 
 type AuthScreenProps = {
   error: string
@@ -166,6 +166,3 @@ export default function AuthScreen({ error, setError, onAuth }: AuthScreenProps)
     </Box>
   )
 }
-
-// Keep formatLocalDate usage in the welcome message accessible from App.tsx
-export { formatLocalDate }

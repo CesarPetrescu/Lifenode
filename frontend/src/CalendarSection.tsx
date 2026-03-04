@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Card,
@@ -15,6 +15,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EventNoteIcon from '@mui/icons-material/EventNote'
 
+import ConfirmDialog from './ConfirmDialog'
 import type { CalendarEvent, SectionProps } from './types'
 import { api, authHeaders, formatLocalDate, runSafe } from './utils'
 
@@ -26,6 +27,12 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
   const [eventDetails, setEventDetails] = useState('')
   const [creatingEvent, setCreatingEvent] = useState(false)
   const [deletingEventId, setDeletingEventId] = useState<number | null>(null)
+  const [deleteEventTarget, setDeleteEventTarget] = useState<CalendarEvent | null>(null)
+
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => a.start_ts.localeCompare(b.start_ts)),
+    [events],
+  )
 
   const loadEvents = useCallback(async () => {
     if (!currentUsername || !token) return
@@ -70,9 +77,10 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
     setCreatingEvent(false)
   }
 
-  const onDeleteEvent = async (eventId: number) => {
+  const onDeleteEvent = async () => {
+    const eventId = deleteEventTarget?.id
     if (!currentUsername || !token) return
-    if (!window.confirm('Delete this event?')) return
+    if (!eventId) return
     setDeletingEventId(eventId)
     await runSafe(setError, async () => {
       await api(`/calendar/events/${encodeURIComponent(currentUsername)}/${eventId}`, {
@@ -81,6 +89,7 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
       })
       await loadEvents()
     })
+    setDeleteEventTarget(null)
     setDeletingEventId(null)
   }
 
@@ -150,7 +159,7 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
             Events
           </Typography>
           <List>
-            {events.length === 0 && (
+            {sortedEvents.length === 0 && (
               <Stack alignItems="center" sx={{ py: 3, opacity: 0.5 }}>
                 <EventNoteIcon sx={{ fontSize: 36, mb: 1 }} />
                 <Typography variant="body2" color="text.secondary">
@@ -158,14 +167,14 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
                 </Typography>
               </Stack>
             )}
-            {events.map((event) => (
+            {sortedEvents.map((event) => (
               <ListItem
                 key={event.id}
                 secondaryAction={
                   <IconButton
                     edge="end"
                     aria-label={`Delete event ${event.title}`}
-                    onClick={() => onDeleteEvent(event.id)}
+                    onClick={() => setDeleteEventTarget(event)}
                     disabled={deletingEventId === event.id}
                   >
                     <DeleteIcon />
@@ -181,6 +190,16 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
           </List>
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={deleteEventTarget != null}
+        title="Delete Event"
+        message={`Delete "${deleteEventTarget?.title ?? ''}"?`}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loading={deleteEventTarget != null && deletingEventId === deleteEventTarget.id}
+        onClose={() => setDeleteEventTarget(null)}
+        onConfirm={() => void onDeleteEvent()}
+      />
     </Stack>
   )
 }

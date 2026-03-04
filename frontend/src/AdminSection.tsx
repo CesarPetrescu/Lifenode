@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material'
 
+import ConfirmDialog from './ConfirmDialog'
 import type { AdminUser, AuthUser } from './types'
 import { api, authHeaders, formatLocalDate, runSafe } from './utils'
 
@@ -24,6 +25,7 @@ type AdminSectionProps = {
 export default function AdminSection({ token, authUser, setAuthUser, setError }: AdminSectionProps) {
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
   const [adminBusyId, setAdminBusyId] = useState<number | null>(null)
+  const [selfRevokeConfirmUser, setSelfRevokeConfirmUser] = useState<AdminUser | null>(null)
 
   const loadAdminUsers = useCallback(async () => {
     if (!token || !authUser.is_admin) return
@@ -35,13 +37,14 @@ export default function AdminSection({ token, authUser, setAuthUser, setError }:
     void runSafe(setError, loadAdminUsers)
   }, [loadAdminUsers, setError])
 
-  const onToggleAdminRole = async (targetUser: AdminUser) => {
+  const onToggleAdminRole = async (targetUser: AdminUser, bypassConfirm = false) => {
     if (!authUser.is_admin || !token) return
     if (
       targetUser.is_admin
       && targetUser.id === authUser.id
-      && !window.confirm('You are about to revoke your own admin access. Continue?')
+      && !bypassConfirm
     ) {
+      setSelfRevokeConfirmUser(targetUser)
       return
     }
     setAdminBusyId(targetUser.id)
@@ -103,6 +106,20 @@ export default function AdminSection({ token, authUser, setAuthUser, setError }:
           ))}
         </List>
       </CardContent>
+      <ConfirmDialog
+        open={selfRevokeConfirmUser != null}
+        title="Revoke Your Admin Access?"
+        message="You are about to remove your own admin role. You may lose access to this section immediately."
+        confirmLabel="Revoke"
+        confirmColor="error"
+        loading={selfRevokeConfirmUser != null && adminBusyId === selfRevokeConfirmUser.id}
+        onClose={() => setSelfRevokeConfirmUser(null)}
+        onConfirm={() => {
+          if (!selfRevokeConfirmUser) return
+          void onToggleAdminRole(selfRevokeConfirmUser, true)
+          setSelfRevokeConfirmUser(null)
+        }}
+      />
     </Card>
   )
 }

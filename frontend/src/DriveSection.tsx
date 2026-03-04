@@ -29,6 +29,7 @@ import DownloadIcon from '@mui/icons-material/Download'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import ConfirmDialog from './ConfirmDialog'
 import type { DriveFolder, DriveTree, DriveTreeFile, SectionProps } from './types'
 import { API_BASE, api, authHeaders, formatLocalDate } from './utils'
 
@@ -103,6 +104,10 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [deleteFileTarget, setDeleteFileTarget] = useState<DriveTreeFile | null>(null)
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<DriveFolder | null>(null)
+  const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null)
+  const [deletingFolderPath, setDeletingFolderPath] = useState<string | null>(null)
 
   const [createFolderOpen, setCreateFolderOpen] = useState(false)
   const [createFolderName, setCreateFolderName] = useState('')
@@ -335,7 +340,7 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
 
   const onDeleteFile = async (path: string) => {
     if (!currentUsername || !token) return
-    if (!window.confirm('Delete this file?')) return
+    setDeletingFilePath(path)
     try {
       setError('')
       await api(
@@ -349,15 +354,18 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
         setSelectedFilePath(null)
         replacePreview(null)
       }
+      setDeleteFileTarget(null)
       await loadTree()
     } catch (err) {
       setError(errorMessage(err))
+    } finally {
+      setDeletingFilePath(null)
     }
   }
 
   const onDeleteFolder = async (path: string) => {
     if (!currentUsername || !token) return
-    if (!window.confirm('Delete this folder and all nested files/folders?')) return
+    setDeletingFolderPath(path)
     try {
       setError('')
       await api(
@@ -372,9 +380,12 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
         setSelectedFilePath(null)
         replacePreview(null)
       }
+      setDeleteFolderTarget(null)
       await loadTree()
     } catch (err) {
       setError(errorMessage(err))
+    } finally {
+      setDeletingFolderPath(null)
     }
   }
 
@@ -496,8 +507,9 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
               size="small"
               color="error"
               aria-label={`Delete folder ${folder.name}`}
+              disabled={deletingFolderPath === folder.path}
               onClick={() => {
-                void onDeleteFolder(folder.path)
+                setDeleteFolderTarget(folder)
               }}
             >
               <DeleteIcon fontSize="small" />
@@ -602,7 +614,12 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Delete file">
-                    <IconButton color="error" aria-label={`Delete file ${selectedFile.name}`} onClick={() => void onDeleteFile(selectedFile.path)}>
+                    <IconButton
+                      color="error"
+                      aria-label={`Delete file ${selectedFile.name}`}
+                      onClick={() => setDeleteFileTarget(selectedFile)}
+                      disabled={deletingFilePath === selectedFile.path}
+                    >
                       <DeleteIcon />
                     </IconButton>
                   </Tooltip>
@@ -703,6 +720,32 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
           </Button>
         </DialogActions>
       </Dialog>
+      <ConfirmDialog
+        open={deleteFileTarget != null}
+        title="Delete File"
+        message={`Delete file "${deleteFileTarget?.name ?? ''}"?`}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loading={deleteFileTarget != null && deletingFilePath === deleteFileTarget.path}
+        onClose={() => setDeleteFileTarget(null)}
+        onConfirm={() => {
+          if (!deleteFileTarget) return
+          void onDeleteFile(deleteFileTarget.path)
+        }}
+      />
+      <ConfirmDialog
+        open={deleteFolderTarget != null}
+        title="Delete Folder"
+        message={`Delete folder "${deleteFolderTarget?.name ?? ''}" and all nested files/folders?`}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loading={deleteFolderTarget != null && deletingFolderPath === deleteFolderTarget.path}
+        onClose={() => setDeleteFolderTarget(null)}
+        onConfirm={() => {
+          if (!deleteFolderTarget) return
+          void onDeleteFolder(deleteFolderTarget.path)
+        }}
+      />
     </Paper>
   )
 }

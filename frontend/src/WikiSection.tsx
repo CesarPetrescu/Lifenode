@@ -247,7 +247,7 @@ export default function WikiSection({ token, currentUsername, setError }: Sectio
 
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') ?? ''
-      const fileMatch = disposition.match(/filename=\"?([^"]+)\"?/)
+      const fileMatch = disposition.match(/filename="?([^"]+)"?/)
       const filename = fileMatch?.[1] ?? `lifenode-wiki-${currentUsername}.txt`
 
       const objectUrl = window.URL.createObjectURL(blob)
