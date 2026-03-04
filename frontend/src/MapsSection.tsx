@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -15,6 +18,8 @@ import {
   Paper,
   Select,
   Stack,
+  Tab,
+  Tabs,
   Switch,
   TextField,
   Typography,
@@ -24,6 +29,7 @@ import PublicIcon from '@mui/icons-material/Public'
 import CancelIcon from '@mui/icons-material/Cancel'
 import DeleteIcon from '@mui/icons-material/Delete'
 import MapIcon from '@mui/icons-material/Map'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 
 import ConfirmDialog from './ConfirmDialog'
 import type {
@@ -156,9 +162,14 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [managerTab, setManagerTab] = useState<'downloads' | 'jobs' | 'files'>('downloads')
 
   const sourceJobs = useMemo(() => jobs.filter((job) => job.source === mode), [jobs, mode])
   const sourceFiles = useMemo(() => files.filter((item) => item.source === mode), [files, mode])
+  const visibleJobs = useMemo(
+    () => sourceJobs.filter((job) => job.status !== 'completed'),
+    [sourceJobs],
+  )
   const runningJob = sourceJobs.find((job) => job.status === 'running' || job.status === 'queued') ?? null
 
   const loadCatalog = useCallback(async () => {
@@ -484,312 +495,68 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
   }, [loadKiwixCatalog])
 
   return (
-    <Stack spacing={2.2}>
+    <Stack spacing={2}>
       <Paper variant="outlined" sx={{ p: 2 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} justifyContent="space-between">
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={1.5}
+          justifyContent="space-between"
+          alignItems={{ md: 'center' }}
+        >
           <Box>
-            <Typography variant="h5">{isWikiMode ? 'Wiki + Offline Knowledge' : 'Maps + Offline'}</Typography>
+            <Typography variant="h5">{isWikiMode ? 'Wiki Viewer Workspace' : 'Maps Viewer Workspace'}</Typography>
             <Typography variant="body2" color="text.secondary">
-              {isWikiMode
-                ? 'Kiwix-powered Wikipedia downloader with embedded offline reader.'
-                : 'OpenStreetMap downloader with in-app map visualizer.'}
+              Viewer first, downloads and file management below.
             </Typography>
           </Box>
-          <Chip
-            icon={<MapIcon />}
-            color={runningJob ? 'warning' : 'default'}
-            label={runningJob ? `Downloading: ${runningJob.label}` : `No active ${sourceLabel.toLowerCase()} download`}
-          />
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            <Chip
+              icon={<MapIcon />}
+              color={runningJob ? 'warning' : 'default'}
+              label={runningJob ? `Downloading: ${runningJob.label}` : `No active ${sourceLabel.toLowerCase()} job`}
+            />
+            <Button variant="outlined" onClick={() => void refreshAll()}>
+              Refresh
+            </Button>
+          </Stack>
         </Stack>
-        <Alert severity="info" sx={{ mt: 1.4 }}>
-          Downloads start only when you press <strong>Download</strong> or <strong>Start Custom Download</strong> and confirm.
-        </Alert>
       </Paper>
 
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          Preset Downloads
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          {sourceName} presets for quick offline setup.
-        </Typography>
-        {visiblePresets.length === 0 ? (
-          <Alert severity="warning" sx={{ mb: 1.2 }}>
-            Presets are unavailable right now. Refresh the page and try again.
-          </Alert>
-        ) : (
-          <Stack spacing={1.2}>
-            {visiblePresets.map((preset) => (
-              <Card key={preset.id} variant="outlined">
-                <CardContent>
-                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2} justifyContent="space-between">
-                    <Box>
-                      <Typography variant="subtitle1">{preset.title}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {preset.description}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Size: {preset.approx_size}
-                      </Typography>
-                    </Box>
-                    <Stack direction={{ xs: 'row', md: 'column' }} spacing={1} alignItems={{ md: 'flex-end' }}>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<DownloadIcon />}
-                        onClick={() => void onStartPreset(preset)}
-                        disabled={!!runningJob || confirmLoading}
-                      >
-                        Download
-                      </Button>
-                      <Button
-                        variant="text"
-                        size="small"
-                        startIcon={<PublicIcon />}
-                        component="a"
-                        href={preset.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Source URL
-                      </Button>
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-        )}
-
-        <Divider sx={{ my: 2 }} />
-
-        <Typography variant="subtitle1" sx={{ mb: 1 }}>
-          Custom Download URL
-        </Typography>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-          <TextField
-            label="Direct download URL"
-            placeholder={isWikiMode ? 'https://download.kiwix.org/zim/…' : 'https://download.geofabrik.de/…'}
-            value={customUrl}
-            onChange={(e) => setCustomUrl(e.target.value)}
-            fullWidth
-            helperText={
-              isWikiMode
-                ? 'Use direct .zim files from Kiwix mirrors.'
-                : 'Use direct .osm.pbf files (Geofabrik or planet mirrors).'
-            }
-          />
-          <TextField
-            label="File name (optional)"
-            placeholder={isWikiMode ? 'wikipedia_en_….zim' : 'romania-latest.osm.pbf'}
-            value={customFileName}
-            onChange={(e) => setCustomFileName(e.target.value)}
-            sx={{ width: { xs: '100%', md: 240 } }}
-          />
-        </Stack>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mt: 1 }}>
-          <TextField
-            label="Label (optional)"
-            placeholder="Friendly label…"
-            value={customLabel}
-            onChange={(e) => setCustomLabel(e.target.value)}
-            fullWidth
-          />
-          <Button
-            variant="outlined"
-            startIcon={<DownloadIcon />}
-            onClick={() => void onStartCustom()}
-            disabled={!customUrl.trim() || !!runningJob || confirmLoading}
+      {isWikiMode ? (
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1}
+            justifyContent="space-between"
+            alignItems={{ md: 'center' }}
+            sx={{ mb: 1.2 }}
           >
-            Start Custom Download
-          </Button>
-        </Stack>
-      </Paper>
-
-      {isWikiMode && (
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            More Kiwix Sources
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Direct entry points for Wikimedia projects and other offline datasets.
-          </Typography>
-          <Stack spacing={1}>
-            {KIWIX_PORTAL_LINKS.map((item) => (
-              <Stack
-                key={item.url}
-                direction={{ xs: 'column', md: 'row' }}
-                justifyContent="space-between"
-                spacing={1}
-                sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+            <Box>
+              <Typography variant="h6">Kiwix Viewer</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Open your downloaded ZIM content directly here.
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              <Chip
+                size="small"
+                variant="outlined"
+                label={hasKiwixZim ? `${sourceFiles.length} downloaded file${sourceFiles.length === 1 ? '' : 's'}` : 'No ZIM downloaded'}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                component="a"
+                href={kiwixViewerUrl.trim() ? kiwixViewerUrl : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                disabled={!kiwixViewerUrl.trim()}
               >
-                <Box>
-                  <Typography variant="subtitle2">{item.title}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {item.description}
-                  </Typography>
-                </Box>
-                <Button
-                  size="small"
-                  variant="text"
-                  startIcon={<PublicIcon />}
-                  component="a"
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Open Source
-                </Button>
-              </Stack>
-            ))}
+                Open Fullscreen
+              </Button>
+            </Stack>
           </Stack>
-        </Paper>
-      )}
 
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          {sourceLabel} Download Jobs
-        </Typography>
-        {sourceJobs.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No {sourceLabel.toLowerCase()} jobs yet.
-          </Typography>
-        ) : (
-          <Stack spacing={1}>
-            {sourceJobs.map((job) => (
-              <Card key={job.id} variant="outlined">
-                <CardContent sx={{ pb: '12px !important' }}>
-                  <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1}>
-                    <Box>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography variant="subtitle2">{job.label}</Typography>
-                        <Chip size="small" label={job.status} color={statusColor(job.status)} />
-                        <Chip size="small" variant="outlined" label={job.source.toUpperCase()} />
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        {job.target_path}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {bytesLabel(job.bytes_downloaded)} /{' '}
-                        {job.bytes_total != null ? bytesLabel(job.bytes_total) : 'unknown'}
-                        {' • '}
-                        updated {formatLocalDate(job.updated_at)}
-                      </Typography>
-                      {job.error_message && (
-                        <Typography variant="caption" color="error" sx={{ display: 'block' }}>
-                          {job.error_message}
-                        </Typography>
-                      )}
-                    </Box>
-                    <Stack direction="row" spacing={1}>
-                      {(job.status === 'running' || job.status === 'queued') && (
-                        <Button
-                          color="error"
-                          variant="text"
-                          startIcon={<CancelIcon />}
-                          onClick={() => void onCancelJob(job.id)}
-                        >
-                          Cancel
-                        </Button>
-                      )}
-                      {job.status !== 'running' && job.status !== 'queued' && (
-                        <Button
-                          color="error"
-                          variant="text"
-                          startIcon={<DeleteIcon />}
-                          onClick={() =>
-                            setConfirmAction({
-                              title: 'Delete Download Log Entry',
-                              message: `Delete this download job log?\n\n${job.label}`,
-                              confirmLabel: 'Delete',
-                              confirmColor: 'error',
-                              onConfirm: async () => {
-                                await onDeleteJob(job)
-                              },
-                            })}
-                          disabled={deletingJobId === job.id}
-                        >
-                          {deletingJobId === job.id ? 'Deleting…' : 'Delete'}
-                        </Button>
-                      )}
-                    </Stack>
-                  </Stack>
-                  <LinearProgress
-                    variant={job.progress != null ? 'determinate' : 'indeterminate'}
-                    value={job.progress ?? undefined}
-                    sx={{ mt: 1.2 }}
-                  />
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-        )}
-      </Paper>
-
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          Downloaded Files
-        </Typography>
-        {sourceFiles.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No {sourceLabel.toLowerCase()} files downloaded yet.
-          </Typography>
-        ) : (
-          <Stack spacing={0.8}>
-            {sourceFiles.map((item) => (
-              <Stack
-                key={`${item.path}-${item.modified_at}`}
-                direction={{ xs: 'column', md: 'row' }}
-                justifyContent="space-between"
-                spacing={1}
-                sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2">{item.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {item.source.toUpperCase()} • {bytesLabel(item.size)} • {formatLocalDate(item.modified_at)}
-                  </Typography>
-                </Box>
-                <Stack direction="row" spacing={1}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => void onDownloadFile(item)}
-                    disabled={deletingFilePath === item.path}
-                  >
-                    Download
-                  </Button>
-                  <Button
-                    size="small"
-                    color="error"
-                    variant="text"
-                    startIcon={<DeleteIcon />}
-                    onClick={() =>
-                      setConfirmAction({
-                        title: 'Delete Downloaded File',
-                        message: `Delete file "${item.name}"?`,
-                        confirmLabel: 'Delete',
-                        confirmColor: 'error',
-                        onConfirm: async () => {
-                          await onDeleteFile(item)
-                        },
-                      })}
-                    disabled={deletingFilePath === item.path}
-                  >
-                    {deletingFilePath === item.path ? 'Deleting…' : 'Delete'}
-                  </Button>
-                </Stack>
-              </Stack>
-            ))}
-          </Stack>
-        )}
-      </Paper>
-
-      {isWikiMode && (
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Kiwix Viewer (Embedded)
-          </Typography>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.2 }}>
             <TextField
               fullWidth
@@ -799,217 +566,526 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
                 setKiwixUrl(e.target.value)
                 setKiwixViewUrl('')
               }}
-              helperText="Use your Kiwix web server URL. To switch datasets, return to Kiwix home and clear category filters."
+              helperText="Use your Kiwix web server URL."
             />
-            <Button
-              variant="text"
-              onClick={() => setKiwixViewUrl('')}
-              disabled={!kiwixViewUrl.trim()}
-            >
+            <Button variant="text" onClick={() => setKiwixViewUrl('')} disabled={!kiwixViewUrl.trim()}>
               Library Home
             </Button>
-            <Button
-              variant="outlined"
-              component="a"
-              href={kiwixViewerUrl.trim() ? kiwixViewerUrl : undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              disabled={!kiwixViewerUrl.trim()}
-            >
-              Open Fullscreen
-            </Button>
           </Stack>
+
           <Box
             sx={{
               border: 1,
               borderColor: 'divider',
-              borderRadius: 1,
+              borderRadius: 1.5,
               overflow: 'hidden',
-              height: { xs: 360, md: 520 },
+              height: { xs: 380, md: 560 },
+              bgcolor: 'background.default',
             }}
           >
             {kiwixViewerUrl.trim() && hasKiwixZim ? (
-              <iframe
-                title="Kiwix"
-                src={kiwixViewerUrl}
-                style={{
-                  border: 0,
-                  width: '100%',
-                  height: '100%',
-                }}
-              />
+              <iframe title="Kiwix" src={kiwixViewerUrl} style={{ border: 0, width: '100%', height: '100%' }} />
             ) : (
-              <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Download at least one Kiwix `.zim` file first, then the embedded viewer will start automatically.
+              <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', px: 2 }}>
+                <Typography variant="body2" color="text.secondary" textAlign="center">
+                  Download at least one `.zim` file, then the viewer will load automatically.
                 </Typography>
               </Box>
             )}
           </Box>
-          <Divider sx={{ my: 1.5 }} />
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
-            <Typography variant="subtitle1" sx={{ minWidth: { md: 180 } }}>
-              ZIM Viewer Navigator
-            </Typography>
-            <TextField
-              size="small"
-              label="Filter Datasets"
-              placeholder="Wikipedia, DevDocs…"
-              value={kiwixCatalogFilter}
-              onChange={(e) => setKiwixCatalogFilter(e.target.value)}
-              fullWidth
-            />
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => void loadKiwixCatalog()}
-              disabled={kiwixCatalogLoading}
-            >
-              {kiwixCatalogLoading ? 'Refreshing…' : 'Refresh'}
-            </Button>
-          </Stack>
-          {kiwixCatalogError && (
-            <Alert severity="warning" sx={{ mt: 1.2 }}>
-              {kiwixCatalogError}
-            </Alert>
-          )}
-          {kiwixCatalogLoading ? (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.2 }}>
-              Loading catalog…
-            </Typography>
-          ) : visibleKiwixCatalogEntries.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.2 }}>
-              No catalog entries found yet.
-            </Typography>
-          ) : (
-            <Stack spacing={0.8} sx={{ mt: 1.2, maxHeight: 300, overflowY: 'auto', pr: 0.5 }}>
-              {visibleKiwixCatalogEntries.map((entry) => (
-                <Stack
-                  key={entry.id}
-                  direction={{ xs: 'column', md: 'row' }}
-                  justifyContent="space-between"
-                  spacing={1}
-                  sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
-                >
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {entry.title || entry.name}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      {entry.summary || 'No description'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {(entry.category || 'uncategorized').toUpperCase()}
-                      {entry.language ? ` • ${entry.language.toUpperCase()}` : ''}
-                      {entry.updated ? ` • ${formatLocalDate(entry.updated)}` : ''}
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1}>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => setKiwixViewUrl(entry.contentUrl)}
-                    >
-                      View Here
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="text"
-                      component="a"
-                      href={entry.contentUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Open Tab
-                    </Button>
-                  </Stack>
-                </Stack>
-              ))}
-            </Stack>
-          )}
-        </Paper>
-      )}
 
-      {!isWikiMode && (
+          <Accordion variant="outlined" sx={{ mt: 1.5 }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="subtitle2">
+                ZIM Catalog Navigator ({visibleKiwixCatalogEntries.length})
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                <TextField
+                  size="small"
+                  label="Filter Datasets"
+                  placeholder="Wikipedia, DevDocs…"
+                  value={kiwixCatalogFilter}
+                  onChange={(e) => setKiwixCatalogFilter(e.target.value)}
+                  fullWidth
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void loadKiwixCatalog()}
+                  disabled={kiwixCatalogLoading}
+                >
+                  {kiwixCatalogLoading ? 'Refreshing…' : 'Refresh'}
+                </Button>
+              </Stack>
+
+              {kiwixCatalogError && (
+                <Alert severity="warning" sx={{ mt: 1.2 }}>
+                  {kiwixCatalogError}
+                </Alert>
+              )}
+              {kiwixCatalogLoading ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.2 }}>
+                  Loading catalog…
+                </Typography>
+              ) : visibleKiwixCatalogEntries.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.2 }}>
+                  No catalog entries found yet.
+                </Typography>
+              ) : (
+                <Stack spacing={0.8} sx={{ mt: 1.2, maxHeight: 280, overflowY: 'auto', pr: 0.5 }}>
+                  {visibleKiwixCatalogEntries.map((entry) => (
+                    <Stack
+                      key={entry.id}
+                      direction={{ xs: 'column', md: 'row' }}
+                      justifyContent="space-between"
+                      spacing={1}
+                      sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+                    >
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {entry.title || entry.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          {entry.summary || 'No description'}
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={1}>
+                        <Button size="small" variant="contained" onClick={() => setKiwixViewUrl(entry.contentUrl)}>
+                          View Here
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          component="a"
+                          href={entry.contentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open Tab
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+            </AccordionDetails>
+          </Accordion>
+        </Paper>
+      ) : (
         <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            OSM Visualizer
-          </Typography>
-          <FormControlLabel
-            sx={{ mb: 1 }}
-            control={
-              <Switch
-                size="small"
-                checked={osmUseDownloadedView}
-                onChange={(e) => setOsmUseDownloadedView(e.target.checked)}
-                disabled={osmDownloadedFiles.length === 0}
-              />
-            }
-            label="Center map from downloaded dataset (no local rendering)"
-          />
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1}
+            justifyContent="space-between"
+            alignItems={{ md: 'center' }}
+            sx={{ mb: 1.2 }}
+          >
+            <Box>
+              <Typography variant="h6">OSM Viewer</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Visual map on top, download controls below.
+              </Typography>
+            </Box>
+            <Chip size="small" variant="outlined" label={`${osmDownloadedFiles.length} downloaded dataset${osmDownloadedFiles.length === 1 ? '' : 's'}`} />
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.2 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={osmUseDownloadedView}
+                  onChange={(e) => setOsmUseDownloadedView(e.target.checked)}
+                  disabled={osmDownloadedFiles.length === 0}
+                />
+              }
+              label="Center from downloaded dataset"
+            />
+            {osmUseDownloadedView && (
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 320 } }}>
+                <InputLabel id="osm-dataset-label">Downloaded Dataset</InputLabel>
+                <Select
+                  labelId="osm-dataset-label"
+                  label="Downloaded Dataset"
+                  value={osmSelectedDatasetPath}
+                  onChange={(e) => setOsmSelectedDatasetPath(e.target.value)}
+                >
+                  {osmDownloadedFiles.map((item) => (
+                    <MenuItem key={item.path} value={item.path}>
+                      {item.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </Stack>
+
           {osmDownloadedFiles.length === 0 && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Download an `.osm` or `.osm.pbf` file first to enable downloaded dataset view.
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.2 }}>
+              Download an `.osm` or `.osm.pbf` file first to enable dataset-centered view.
             </Typography>
           )}
-          {osmUseDownloadedView && (
-            <FormControl size="small" sx={{ mb: 1.2, width: { xs: '100%', md: 420 } }}>
-              <InputLabel id="osm-dataset-label">Downloaded Dataset</InputLabel>
-              <Select
-                labelId="osm-dataset-label"
-                label="Downloaded Dataset"
-                value={osmSelectedDatasetPath}
-                onChange={(e) => setOsmSelectedDatasetPath(e.target.value)}
-              >
-                {osmDownloadedFiles.map((item) => (
-                  <MenuItem key={item.path} value={item.path}>
-                    {item.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.2 }}>
+
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.2 }}>
             <TextField
               type="number"
               label="Latitude"
               value={osmLat}
               onChange={(e) => setOsmLat(Number(e.target.value))}
-              sx={{ width: { xs: '100%', md: 180 } }}
+              sx={{ width: { xs: '100%', sm: 180 } }}
             />
             <TextField
               type="number"
               label="Longitude"
               value={osmLon}
               onChange={(e) => setOsmLon(Number(e.target.value))}
-              sx={{ width: { xs: '100%', md: 180 } }}
+              sx={{ width: { xs: '100%', sm: 180 } }}
             />
             <TextField
               type="number"
               label="Zoom"
               value={osmZoom}
               onChange={(e) => setOsmZoom(Number(e.target.value))}
-              sx={{ width: { xs: '100%', md: 120 } }}
+              sx={{ width: { xs: '100%', sm: 120 } }}
             />
           </Stack>
+
           <Box
             sx={{
               border: 1,
               borderColor: 'divider',
-              borderRadius: 1,
+              borderRadius: 1.5,
               overflow: 'hidden',
-              height: { xs: 340, md: 500 },
+              height: { xs: 380, md: 560 },
             }}
           >
             <iframe title="OSM Visualizer" src={osmEmbedUrl} style={{ border: 0, width: '100%', height: '100%' }} />
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
             {osmUseDownloadedView
-              ? 'This mode uses your downloaded file name to pick a map center/zoom when recognized. Tile rendering is still online OpenStreetMap.'
+              ? 'Dataset mode adjusts center/zoom when a known region is detected. Tiles remain online OpenStreetMap.'
               : 'Viewer uses OpenStreetMap online tiles.'}
           </Typography>
         </Paper>
       )}
+
+      <Paper variant="outlined" sx={{ p: 0, overflow: 'hidden' }}>
+        <Box sx={{ px: 2, pt: 2 }}>
+          <Typography variant="h6">Download Manager</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Start downloads, monitor jobs, and manage files.
+          </Typography>
+        </Box>
+        <Tabs
+          value={managerTab}
+          onChange={(_, value) => setManagerTab(value as 'downloads' | 'jobs' | 'files')}
+          variant="fullWidth"
+          sx={{ px: 1.5, mt: 1 }}
+        >
+          <Tab value="downloads" label={`Downloads (${visiblePresets.length})`} />
+          <Tab value="jobs" label={`Jobs (${visibleJobs.length})`} />
+          <Tab value="files" label={`Files (${sourceFiles.length})`} />
+        </Tabs>
+        <Divider />
+
+        <Box sx={{ p: 2 }}>
+          {managerTab === 'downloads' && (
+            <Stack spacing={2}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gap: 2,
+                  gridTemplateColumns: { xs: '1fr', lg: '1.1fr 1fr' },
+                }}
+              >
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                      Custom Download URL
+                    </Typography>
+                    <Stack spacing={1}>
+                      <TextField
+                        label="Direct download URL"
+                        placeholder={isWikiMode ? 'https://download.kiwix.org/zim/…' : 'https://download.geofabrik.de/…'}
+                        value={customUrl}
+                        onChange={(e) => setCustomUrl(e.target.value)}
+                        fullWidth
+                      />
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                        <TextField
+                          label="File name (optional)"
+                          placeholder={isWikiMode ? 'wikipedia_en_….zim' : 'romania-latest.osm.pbf'}
+                          value={customFileName}
+                          onChange={(e) => setCustomFileName(e.target.value)}
+                          fullWidth
+                        />
+                        <TextField
+                          label="Label (optional)"
+                          placeholder="Friendly label…"
+                          value={customLabel}
+                          onChange={(e) => setCustomLabel(e.target.value)}
+                          fullWidth
+                        />
+                      </Stack>
+                      <Button
+                        variant="contained"
+                        startIcon={<DownloadIcon />}
+                        onClick={() => void onStartCustom()}
+                        disabled={!customUrl.trim() || !!runningJob || confirmLoading}
+                      >
+                        Start Custom Download
+                      </Button>
+                    </Stack>
+                  </CardContent>
+                </Card>
+
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                      Preset Downloads
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                      {sourceName} presets for quick setup.
+                    </Typography>
+                    {visiblePresets.length === 0 ? (
+                      <Alert severity="warning">
+                        Presets are unavailable right now. Refresh and try again.
+                      </Alert>
+                    ) : (
+                      <Stack spacing={1} sx={{ maxHeight: 360, overflowY: 'auto', pr: 0.5 }}>
+                        {visiblePresets.map((preset) => (
+                          <Stack
+                            key={preset.id}
+                            direction={{ xs: 'column', sm: 'row' }}
+                            justifyContent="space-between"
+                            spacing={1}
+                            sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+                          >
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="subtitle2">{preset.title}</Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                {preset.description}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Size: {preset.approx_size}
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={1}>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={() => void onStartPreset(preset)}
+                                disabled={!!runningJob || confirmLoading}
+                              >
+                                Download
+                              </Button>
+                              <Button
+                                variant="text"
+                                size="small"
+                                component="a"
+                                href={preset.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Source
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        ))}
+                      </Stack>
+                    )}
+                  </CardContent>
+                </Card>
+              </Box>
+
+              {isWikiMode && (
+                <Accordion variant="outlined">
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography variant="subtitle2">More Kiwix Source Portals</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={1}>
+                      {KIWIX_PORTAL_LINKS.map((item) => (
+                        <Stack
+                          key={item.url}
+                          direction={{ xs: 'column', sm: 'row' }}
+                          justifyContent="space-between"
+                          spacing={1}
+                          sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+                        >
+                          <Box>
+                            <Typography variant="subtitle2">{item.title}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {item.description}
+                            </Typography>
+                          </Box>
+                          <Button
+                            size="small"
+                            variant="text"
+                            startIcon={<PublicIcon />}
+                            component="a"
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Open
+                          </Button>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+            </Stack>
+          )}
+
+          {managerTab === 'jobs' && (
+            <>
+              {visibleJobs.length === 0 ? (
+                sourceJobs.length > 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No pending jobs. Completed jobs are hidden.
+                  </Typography>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    No {sourceLabel.toLowerCase()} jobs yet.
+                  </Typography>
+                )
+              ) : (
+                <Stack spacing={1}>
+                  {visibleJobs.map((job) => (
+                    <Card key={job.id} variant="outlined">
+                      <CardContent sx={{ pb: '12px !important' }}>
+                        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1}>
+                          <Box>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="subtitle2">{job.label}</Typography>
+                              <Chip size="small" label={job.status} color={statusColor(job.status)} />
+                              <Chip size="small" variant="outlined" label={job.source.toUpperCase()} />
+                            </Stack>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              {job.target_path}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {bytesLabel(job.bytes_downloaded)} /{' '}
+                              {job.bytes_total != null ? bytesLabel(job.bytes_total) : 'unknown'}
+                              {' • '}
+                              updated {formatLocalDate(job.updated_at)}
+                            </Typography>
+                            {job.error_message && (
+                              <Typography variant="caption" color="error" sx={{ display: 'block' }}>
+                                {job.error_message}
+                              </Typography>
+                            )}
+                          </Box>
+                          <Stack direction="row" spacing={1}>
+                            {(job.status === 'running' || job.status === 'queued') && (
+                              <Button
+                                color="error"
+                                variant="text"
+                                startIcon={<CancelIcon />}
+                                onClick={() => void onCancelJob(job.id)}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                            {job.status !== 'running' && job.status !== 'queued' && (
+                              <Button
+                                color="error"
+                                variant="text"
+                                startIcon={<DeleteIcon />}
+                                onClick={() =>
+                                  setConfirmAction({
+                                    title: 'Delete Download Log Entry',
+                                    message: `Delete this download job log?\n\n${job.label}`,
+                                    confirmLabel: 'Delete',
+                                    confirmColor: 'error',
+                                    onConfirm: async () => {
+                                      await onDeleteJob(job)
+                                    },
+                                  })}
+                                disabled={deletingJobId === job.id}
+                              >
+                                {deletingJobId === job.id ? 'Deleting…' : 'Delete'}
+                              </Button>
+                            )}
+                          </Stack>
+                        </Stack>
+                        <LinearProgress
+                          variant={job.progress != null ? 'determinate' : 'indeterminate'}
+                          value={job.progress ?? undefined}
+                          sx={{ mt: 1.2 }}
+                        />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Stack>
+              )}
+            </>
+          )}
+
+          {managerTab === 'files' && (
+            <>
+              {sourceFiles.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No {sourceLabel.toLowerCase()} files downloaded yet.
+                </Typography>
+              ) : (
+                <Stack spacing={0.8}>
+                  {sourceFiles.map((item) => (
+                    <Stack
+                      key={`${item.path}-${item.modified_at}`}
+                      direction={{ xs: 'column', md: 'row' }}
+                      justifyContent="space-between"
+                      spacing={1}
+                      sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+                    >
+                      <Box>
+                        <Typography variant="subtitle2">{item.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {item.source.toUpperCase()} • {bytesLabel(item.size)} • {formatLocalDate(item.modified_at)}
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => void onDownloadFile(item)}
+                          disabled={deletingFilePath === item.path}
+                        >
+                          Download
+                        </Button>
+                        <Button
+                          size="small"
+                          color="error"
+                          variant="text"
+                          startIcon={<DeleteIcon />}
+                          onClick={() =>
+                            setConfirmAction({
+                              title: 'Delete Downloaded File',
+                              message: `Delete file "${item.name}"?`,
+                              confirmLabel: 'Delete',
+                              confirmColor: 'error',
+                              onConfirm: async () => {
+                                await onDeleteFile(item)
+                              },
+                            })}
+                          disabled={deletingFilePath === item.path}
+                        >
+                          {deletingFilePath === item.path ? 'Deleting…' : 'Delete'}
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+            </>
+          )}
+        </Box>
+      </Paper>
+
       <ConfirmDialog
         open={confirmAction != null}
         title={confirmAction?.title ?? 'Confirm Action'}
