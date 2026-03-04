@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Component, PathBuf},
     time::{Duration, Instant},
 };
@@ -11,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
-use futures::StreamExt;
+use futures::{StreamExt, future::join_all};
 use reqwest::Url;
 use serde::Deserialize;
 use sqlx::Row;
@@ -37,6 +38,13 @@ struct DatasetPreset {
     approx_size: &'static str,
 }
 
+#[derive(Clone, Copy)]
+struct KiwixDiscoverySpec {
+    id: &'static str,
+    index_url: &'static str,
+    filename_prefix: &'static str,
+}
+
 const KIWIX_PRESETS: &[DatasetPreset] = &[
     DatasetPreset {
         id: "kiwix_wikipedia_en_nopic",
@@ -54,8 +62,110 @@ const KIWIX_PRESETS: &[DatasetPreset] = &[
         url: "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-02.zim",
         approx_size: "~110 GB",
     },
+    DatasetPreset {
+        id: "kiwix_wiktionary_en_nopic",
+        source: "kiwix",
+        title: "Wiktionary EN",
+        description: "English offline dictionary with definitions, usage, and translations.",
+        url: "https://download.kiwix.org/zim/wiktionary/wiktionary_en_all_nopic_2026-02.zim",
+        approx_size: "~2 GB",
+    },
+    DatasetPreset {
+        id: "kiwix_wikivoyage_en_maxi",
+        source: "kiwix",
+        title: "Wikivoyage EN",
+        description: "Offline travel guides and destination knowledge from Wikivoyage.",
+        url: "https://download.kiwix.org/zim/wikivoyage/wikivoyage_en_all_maxi_2025-12.zim",
+        approx_size: "~2 GB",
+    },
+    DatasetPreset {
+        id: "kiwix_wikibooks_en_maxi",
+        source: "kiwix",
+        title: "Wikibooks EN",
+        description: "Open textbooks and manuals for offline study.",
+        url: "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-01.zim",
+        approx_size: "~5 GB",
+    },
+    DatasetPreset {
+        id: "kiwix_wikiversity_en_maxi",
+        source: "kiwix",
+        title: "Wikiversity EN",
+        description: "Learning resources and course-style educational content.",
+        url: "https://download.kiwix.org/zim/wikiversity/wikiversity_en_all_maxi_2026-02.zim",
+        approx_size: "~1 GB",
+    },
+    DatasetPreset {
+        id: "kiwix_wikiquote_en_maxi",
+        source: "kiwix",
+        title: "Wikiquote EN",
+        description: "Large quote collections and citation references.",
+        url: "https://download.kiwix.org/zim/wikiquote/wikiquote_en_all_maxi_2026-01.zim",
+        approx_size: "~1 GB",
+    },
+    DatasetPreset {
+        id: "kiwix_wikisource_en_maxi",
+        source: "kiwix",
+        title: "Wikisource EN",
+        description: "Public domain and source texts for offline reading.",
+        url: "https://download.kiwix.org/zim/wikisource/wikisource_en_all_maxi_2026-02.zim",
+        approx_size: "~6 GB",
+    },
+    DatasetPreset {
+        id: "kiwix_wikinews_en_maxi",
+        source: "kiwix",
+        title: "Wikinews EN",
+        description: "Archived news articles for offline access.",
+        url: "https://download.kiwix.org/zim/wikinews/wikinews_en_all_maxi_2026-01.zim",
+        approx_size: "~1 GB",
+    },
 ];
-const KIWIX_WIKIPEDIA_INDEX_URL: &str = "https://download.kiwix.org/zim/wikipedia/";
+const KIWIX_DISCOVERY_SPECS: &[KiwixDiscoverySpec] = &[
+    KiwixDiscoverySpec {
+        id: "kiwix_wikipedia_en_nopic",
+        index_url: "https://download.kiwix.org/zim/wikipedia/",
+        filename_prefix: "wikipedia_en_all_nopic_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikipedia_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikipedia/",
+        filename_prefix: "wikipedia_en_all_maxi_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wiktionary_en_nopic",
+        index_url: "https://download.kiwix.org/zim/wiktionary/",
+        filename_prefix: "wiktionary_en_all_nopic_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikivoyage_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikivoyage/",
+        filename_prefix: "wikivoyage_en_all_maxi_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikibooks_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikibooks/",
+        filename_prefix: "wikibooks_en_all_maxi_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikiversity_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikiversity/",
+        filename_prefix: "wikiversity_en_all_maxi_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikiquote_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikiquote/",
+        filename_prefix: "wikiquote_en_all_maxi_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikisource_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikisource/",
+        filename_prefix: "wikisource_en_all_maxi_",
+    },
+    KiwixDiscoverySpec {
+        id: "kiwix_wikinews_en_maxi",
+        index_url: "https://download.kiwix.org/zim/wikinews/",
+        filename_prefix: "wikinews_en_all_maxi_",
+    },
+];
 
 const OSM_PRESETS: &[DatasetPreset] = &[
     DatasetPreset {
@@ -99,15 +209,10 @@ pub struct MapPathQuery {
 
 pub async fn maps_catalog() -> impl IntoResponse {
     let mut kiwix = KIWIX_PRESETS.iter().map(preset_to_item).collect::<Vec<_>>();
-    if let Some((latest_nopic, latest_maxi)) = discover_latest_kiwix_urls().await {
-        for item in &mut kiwix {
-            if item.id == "kiwix_wikipedia_en_nopic" {
-                item.url = latest_nopic.clone();
-                continue;
-            }
-            if item.id == "kiwix_wikipedia_en_maxi" {
-                item.url = latest_maxi.clone();
-            }
+    let discovered_urls = discover_latest_kiwix_urls().await;
+    for item in &mut kiwix {
+        if let Some(latest) = discovered_urls.get(&item.id) {
+            item.url = latest.clone();
         }
     }
     let osm = OSM_PRESETS.iter().map(preset_to_item).collect::<Vec<_>>();
@@ -130,15 +235,45 @@ pub async fn maps_catalog() -> impl IntoResponse {
     })
 }
 
-async fn discover_latest_kiwix_urls() -> Option<(String, String)> {
+async fn discover_latest_kiwix_urls() -> HashMap<String, String> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(12))
         .build()
-        .ok()?;
+        .ok();
 
+    let Some(client) = client else {
+        warn!("maps catalog: could not build client for kiwix discovery");
+        return HashMap::new();
+    };
+
+    let jobs = KIWIX_DISCOVERY_SPECS.iter().map(|spec| async {
+        let resolved = discover_latest_kiwix_url(&client, spec.index_url, spec.filename_prefix).await;
+        (spec.id, resolved)
+    });
+    let discovered = join_all(jobs).await;
+
+    let mut result = HashMap::new();
+    for (id, resolved) in discovered {
+        if let Some(url) = resolved {
+            result.insert(id.to_string(), url);
+        } else {
+            warn!(
+                "maps catalog: could not resolve latest kiwix filename for id={}",
+                id
+            );
+        }
+    }
+    result
+}
+
+async fn discover_latest_kiwix_url(
+    client: &reqwest::Client,
+    index_url: &str,
+    filename_prefix: &str,
+) -> Option<String> {
     let body = client
-        .get(KIWIX_WIKIPEDIA_INDEX_URL)
+        .get(index_url)
         .send()
         .await
         .ok()?
@@ -147,19 +282,8 @@ async fn discover_latest_kiwix_urls() -> Option<(String, String)> {
         .text()
         .await
         .ok()?;
-
-    let latest_nopic = extract_latest_kiwix_filename(&body, "wikipedia_en_all_nopic_");
-    let latest_maxi = extract_latest_kiwix_filename(&body, "wikipedia_en_all_maxi_");
-    match (latest_nopic, latest_maxi) {
-        (Some(nopic), Some(maxi)) => Some((
-            format!("{KIWIX_WIKIPEDIA_INDEX_URL}{nopic}"),
-            format!("{KIWIX_WIKIPEDIA_INDEX_URL}{maxi}"),
-        )),
-        _ => {
-            warn!("maps catalog: could not resolve latest kiwix english zim filenames");
-            None
-        }
-    }
+    let latest = extract_latest_kiwix_filename(&body, filename_prefix)?;
+    Some(format!("{index_url}{latest}"))
 }
 
 fn extract_latest_kiwix_filename(index_html: &str, prefix: &str) -> Option<String> {

@@ -67,6 +67,9 @@ function App() {
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
   const colorMode = useContext(ColorModeContext)
   const isDark = theme.palette.mode === 'dark'
+  const shellBg = isDark ? 'rgba(10, 12, 18, 0.9)' : 'rgba(244, 247, 255, 0.92)'
+  const shellText = isDark ? 'rgba(236, 241, 255, 0.95)' : 'rgba(22, 29, 44, 0.95)'
+  const shellBorder = isDark ? 'rgba(160, 176, 214, 0.22)' : 'rgba(154, 166, 194, 0.38)'
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [section, setSection] = useState<AppSection>(() => readSectionFromUrl() ?? 'wiki')
@@ -314,15 +317,24 @@ function App() {
   // ── Main app ────────────────────────────────────────────────────────
 
   return (
-    <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
+    <Box
+      sx={{
+        minHeight: '100dvh',
+        bgcolor: isDark ? '#0d1018' : '#eef2fb',
+        backgroundImage: isDark
+          ? 'radial-gradient(circle at 10% 0%, rgba(68,94,159,0.16), transparent 42%)'
+          : 'radial-gradient(circle at 10% 0%, rgba(83,110,183,0.22), transparent 45%)',
+      }}
+    >
       <a href="#main-content" className="skip-link">Skip to content</a>
       <AppBar position="fixed" color="transparent" elevation={0}>
         <Toolbar
           sx={{
             borderBottom: 1,
-            borderColor: 'divider',
-            bgcolor: isDark ? 'rgba(15,17,23,0.85)' : 'rgba(255,255,255,0.82)',
-            backdropFilter: 'blur(8px)',
+            borderColor: shellBorder,
+            bgcolor: shellBg,
+            color: shellText,
+            backdropFilter: 'blur(10px)',
           }}
         >
           <IconButton
@@ -380,7 +392,9 @@ function App() {
               width: DRAWER_WIDTH,
               boxSizing: 'border-box',
               borderRight: 1,
-              borderColor: 'divider',
+              borderColor: shellBorder,
+              bgcolor: shellBg,
+              color: shellText,
               mt: { xs: '64px', md: '64px' },
               height: { xs: 'calc(100% - 64px)', md: 'calc(100% - 64px)' },
             },

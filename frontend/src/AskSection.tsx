@@ -589,7 +589,13 @@ export default function AskSection({ token, currentUsername, setError }: Section
           sx={{
             p: 1.5,
             borderTop: 1,
-            borderColor: 'divider',
+            borderColor: (t) => (t.palette.mode === 'dark'
+              ? alpha(t.palette.common.white, 0.12)
+              : alpha(t.palette.common.black, 0.14)),
+            bgcolor: (t) => (t.palette.mode === 'dark'
+              ? 'rgba(12, 16, 24, 0.94)'
+              : 'rgba(248, 251, 255, 0.96)'),
+            color: (t) => (t.palette.mode === 'dark' ? 'rgba(236, 241, 255, 0.95)' : 'inherit'),
             borderRadius: 0,
           }}
         >

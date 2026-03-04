@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Card,
   CardContent,
   Chip,
   Divider,
+  FormControl,
+  FormControlLabel,
+  InputLabel,
   LinearProgress,
+  MenuItem,
   Paper,
+  Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material'
@@ -29,6 +36,16 @@ import { api, authHeaders, formatLocalDate } from './utils'
 
 type OfflineSource = 'kiwix' | 'osm'
 type MapsSectionProps = SectionProps & { mode: OfflineSource }
+type KiwixCatalogEntry = {
+  id: string
+  title: string
+  summary: string
+  name: string
+  language: string
+  category: string
+  updated: string
+  contentUrl: string
+}
 
 function bytesLabel(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '0 B'
@@ -61,6 +78,48 @@ function buildOsmEmbedUrl(lat: number, lon: number, zoom: number): string {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`
 }
 
+function fileNameFromUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw)
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    const last = parts[parts.length - 1]
+    if (!last) return null
+    return decodeURIComponent(last)
+  } catch {
+    return null
+  }
+}
+
+function inferOsmViewport(pathOrName: string): { lat: number, lon: number, zoom: number } | null {
+  const value = pathOrName.toLowerCase()
+  if (value.includes('romania')) return { lat: 45.9432, lon: 24.9668, zoom: 6 }
+  if (value.includes('europe')) return { lat: 54.526, lon: 15.2551, zoom: 4 }
+  if (value.includes('us') || value.includes('usa') || value.includes('united-states')) {
+    return { lat: 39.8283, lon: -98.5795, zoom: 4 }
+  }
+  if (value.includes('planet')) return { lat: 20, lon: 0, zoom: 2 }
+  return null
+}
+
+function textFromXmlTag(parent: Element, tag: string): string {
+  const node = parent.getElementsByTagNameNS('*', tag)[0] ?? parent.getElementsByTagName(tag)[0]
+  return node?.textContent?.trim() ?? ''
+}
+
+const KIWIX_PORTAL_LINKS = [
+  { title: 'Kiwix Library', url: 'https://library.kiwix.org/', description: 'Browse all Kiwix datasets by topic and language.' },
+  { title: 'All ZIM Index', url: 'https://download.kiwix.org/zim/', description: 'Master index for all downloadable ZIM categories.' },
+  { title: 'Wiktionary', url: 'https://download.kiwix.org/zim/wiktionary/', description: 'Offline dictionaries and translations.' },
+  { title: 'Wikivoyage', url: 'https://download.kiwix.org/zim/wikivoyage/', description: 'Offline travel guides and destinations.' },
+  { title: 'Wikibooks', url: 'https://download.kiwix.org/zim/wikibooks/', description: 'Textbooks and manuals.' },
+  { title: 'Wikiversity', url: 'https://download.kiwix.org/zim/wikiversity/', description: 'Course-style learning resources.' },
+  { title: 'Wikiquote', url: 'https://download.kiwix.org/zim/wikiquote/', description: 'Quotes and citation collections.' },
+  { title: 'Wikisource', url: 'https://download.kiwix.org/zim/wikisource/', description: 'Source texts and public domain works.' },
+  { title: 'Wikinews', url: 'https://download.kiwix.org/zim/wikinews/', description: 'Archived news content.' },
+  { title: 'DevDocs', url: 'https://download.kiwix.org/zim/devdocs/', description: 'Offline developer documentation bundles.' },
+  { title: 'Stack Exchange', url: 'https://download.kiwix.org/zim/stack_exchange/', description: 'Offline Q&A archives including Stack Overflow.' },
+]
+
 export default function MapsSection({ token, currentUsername, setError, mode }: MapsSectionProps) {
   const isWikiMode = mode === 'kiwix'
   const sourceLabel = isWikiMode ? 'Wiki' : 'Maps'
@@ -75,9 +134,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
   const [customLabel, setCustomLabel] = useState('')
 
   const [kiwixUrl, setKiwixUrl] = useState('')
+  const [kiwixViewUrl, setKiwixViewUrl] = useState('')
+  const [kiwixCatalogEntries, setKiwixCatalogEntries] = useState<KiwixCatalogEntry[]>([])
+  const [kiwixCatalogLoading, setKiwixCatalogLoading] = useState(false)
+  const [kiwixCatalogError, setKiwixCatalogError] = useState('')
+  const [kiwixCatalogFilter, setKiwixCatalogFilter] = useState('')
   const [osmLat, setOsmLat] = useState(44.4268)
   const [osmLon, setOsmLon] = useState(26.1025)
   const [osmZoom, setOsmZoom] = useState(6)
+  const [osmUseDownloadedView, setOsmUseDownloadedView] = useState(false)
+  const [osmSelectedDatasetPath, setOsmSelectedDatasetPath] = useState('')
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null)
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null)
 
@@ -146,6 +212,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
   const onStartPreset = async (preset: MapDatasetPreset) => {
     if (!currentUsername) return
     try {
+      const inferredName = fileNameFromUrl(preset.url)
+      const existing = inferredName
+        ? sourceFiles.find((item) => item.name === inferredName)
+        : undefined
+      if (existing && !window.confirm(`"${existing.name}" already exists.\n\nRe-download and overwrite it?`)) {
+        return
+      }
+      if (!window.confirm(`Start download now?\n\n${preset.title}\nApprox size: ${preset.approx_size}`)) {
+        return
+      }
       setError('')
       await api<MapDownloadJob>(`/maps/jobs/${encodeURIComponent(currentUsername)}`, {
         method: 'POST',
@@ -161,6 +237,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
   const onStartCustom = async () => {
     if (!currentUsername || !customUrl.trim()) return
     try {
+      const requestedName = customFileName.trim() || fileNameFromUrl(customUrl.trim()) || ''
+      const existing = requestedName
+        ? sourceFiles.find((item) => item.name === requestedName)
+        : undefined
+      if (existing && !window.confirm(`"${existing.name}" already exists.\n\nRe-download and overwrite it?`)) {
+        return
+      }
+      if (!window.confirm(`Start custom download from:\n${customUrl.trim()}`)) {
+        return
+      }
       setError('')
       await api<MapDownloadJob>(`/maps/jobs/${encodeURIComponent(currentUsername)}`, {
         method: 'POST',
@@ -269,11 +355,106 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
     () => sourceFiles.some((f) => f.name.toLowerCase().endsWith('.zim')),
     [sourceFiles],
   )
+  const osmDownloadedFiles = useMemo(
+    () =>
+      sourceFiles.filter((f) => {
+        const lower = f.name.toLowerCase()
+        return lower.endsWith('.osm.pbf') || lower.endsWith('.osm') || lower.endsWith('.pbf')
+      }),
+    [sourceFiles],
+  )
 
   const osmEmbedUrl = useMemo(
     () => buildOsmEmbedUrl(osmLat, osmLon, osmZoom),
     [osmLat, osmLon, osmZoom],
   )
+  const kiwixViewerUrl = useMemo(
+    () => (kiwixViewUrl.trim() ? kiwixViewUrl.trim() : kiwixUrl.trim()),
+    [kiwixUrl, kiwixViewUrl],
+  )
+  const visibleKiwixCatalogEntries = useMemo(() => {
+    const q = kiwixCatalogFilter.trim().toLowerCase()
+    if (!q) return kiwixCatalogEntries
+    return kiwixCatalogEntries.filter((entry) => {
+      const haystack = `${entry.title} ${entry.name} ${entry.category} ${entry.language}`.toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [kiwixCatalogEntries, kiwixCatalogFilter])
+
+  useEffect(() => {
+    if (!osmUseDownloadedView) return
+    if (osmSelectedDatasetPath && osmDownloadedFiles.some((item) => item.path === osmSelectedDatasetPath)) return
+    setOsmSelectedDatasetPath(osmDownloadedFiles[0]?.path ?? '')
+  }, [osmDownloadedFiles, osmSelectedDatasetPath, osmUseDownloadedView])
+
+  useEffect(() => {
+    if (!osmUseDownloadedView || !osmSelectedDatasetPath) return
+    const inferred = inferOsmViewport(osmSelectedDatasetPath)
+    if (!inferred) return
+    setOsmLat(inferred.lat)
+    setOsmLon(inferred.lon)
+    setOsmZoom(inferred.zoom)
+  }, [osmSelectedDatasetPath, osmUseDownloadedView])
+
+  const loadKiwixCatalog = useCallback(async () => {
+    if (!isWikiMode || !kiwixUrl.trim() || !hasKiwixZim) {
+      setKiwixCatalogEntries([])
+      setKiwixCatalogError('')
+      return
+    }
+    setKiwixCatalogLoading(true)
+    setKiwixCatalogError('')
+    try {
+      const catalogUrl = new URL('/catalog/v2/entries?count=-1', kiwixUrl).toString()
+      const res = await fetch(catalogUrl)
+      if (!res.ok) {
+        throw new Error(`Failed to load Kiwix catalog (${res.status})`)
+      }
+      const xmlText = await res.text()
+      const doc = new DOMParser().parseFromString(xmlText, 'application/xml')
+      const parseError = doc.querySelector('parsererror')
+      if (parseError) {
+        throw new Error('Kiwix catalog parse error')
+      }
+      const nodes = Array.from(doc.getElementsByTagNameNS('*', 'entry'))
+      const entries = nodes.map((node) => {
+        const title = textFromXmlTag(node, 'title')
+        const summary = textFromXmlTag(node, 'summary')
+        const name = textFromXmlTag(node, 'name')
+        const id = textFromXmlTag(node, 'id') || name || title
+        const language = textFromXmlTag(node, 'language')
+        const category = textFromXmlTag(node, 'category')
+        const updated = textFromXmlTag(node, 'updated')
+        const linkNodes = Array.from(node.getElementsByTagNameNS('*', 'link'))
+        const contentHref =
+          linkNodes.find((linkNode) => (linkNode.getAttribute('type') || '').includes('text/html'))
+            ?.getAttribute('href')
+          || ''
+        const contentUrl = contentHref ? new URL(contentHref, kiwixUrl).toString() : kiwixUrl
+        return {
+          id,
+          title,
+          summary,
+          name,
+          language,
+          category,
+          updated,
+          contentUrl,
+        }
+      })
+      entries.sort((a, b) => a.title.localeCompare(b.title))
+      setKiwixCatalogEntries(entries)
+    } catch (err) {
+      setKiwixCatalogError(err instanceof Error ? err.message : String(err))
+      setKiwixCatalogEntries([])
+    } finally {
+      setKiwixCatalogLoading(false)
+    }
+  }, [hasKiwixZim, isWikiMode, kiwixUrl])
+
+  useEffect(() => {
+    void loadKiwixCatalog()
+  }, [loadKiwixCatalog])
 
   return (
     <Stack spacing={2.2}>
@@ -293,6 +474,9 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
             label={runningJob ? `Downloading: ${runningJob.label}` : `No active ${sourceLabel.toLowerCase()} download`}
           />
         </Stack>
+        <Alert severity="info" sx={{ mt: 1.4 }}>
+          Downloads start only when you press <strong>Download</strong> or <strong>Start Custom Download</strong> and confirm.
+        </Alert>
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -382,6 +566,43 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
           </Button>
         </Stack>
       </Paper>
+
+      {isWikiMode && (
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            More Kiwix Sources
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Direct entry points for Wikimedia projects and other offline datasets.
+          </Typography>
+          <Stack spacing={1}>
+            {KIWIX_PORTAL_LINKS.map((item) => (
+              <Stack
+                key={item.url}
+                direction={{ xs: 'column', md: 'row' }}
+                justifyContent="space-between"
+                spacing={1}
+                sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2">{item.title}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {item.description}
+                  </Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={<PublicIcon />}
+                  onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                >
+                  Open Source
+                </Button>
+              </Stack>
+            ))}
+          </Stack>
+        </Paper>
+      )}
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="h6" sx={{ mb: 1 }}>
@@ -514,13 +735,23 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
               fullWidth
               label="Kiwix URL"
               value={kiwixUrl}
-              onChange={(e) => setKiwixUrl(e.target.value)}
-              helperText="Use your Kiwix web server URL. Default is port 8081 on this host."
+              onChange={(e) => {
+                setKiwixUrl(e.target.value)
+                setKiwixViewUrl('')
+              }}
+              helperText="Use your Kiwix web server URL. To switch datasets, return to Kiwix home and clear category filters."
             />
             <Button
+              variant="text"
+              onClick={() => setKiwixViewUrl('')}
+              disabled={!kiwixViewUrl.trim()}
+            >
+              Library Home
+            </Button>
+            <Button
               variant="outlined"
-              onClick={() => window.open(kiwixUrl, '_blank', 'noopener,noreferrer')}
-              disabled={!kiwixUrl.trim()}
+              onClick={() => window.open(kiwixViewerUrl, '_blank', 'noopener,noreferrer')}
+              disabled={!kiwixViewerUrl.trim()}
             >
               Open Fullscreen
             </Button>
@@ -534,8 +765,16 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
               height: { xs: 360, md: 520 },
             }}
           >
-            {kiwixUrl.trim() && hasKiwixZim ? (
-              <iframe title="Kiwix" src={kiwixUrl} style={{ border: 0, width: '100%', height: '100%' }} />
+            {kiwixViewerUrl.trim() && hasKiwixZim ? (
+              <iframe
+                title="Kiwix"
+                src={kiwixViewerUrl}
+                style={{
+                  border: 0,
+                  width: '100%',
+                  height: '100%',
+                }}
+              />
             ) : (
               <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
                 <Typography variant="body2" color="text.secondary">
@@ -544,6 +783,84 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
               </Box>
             )}
           </Box>
+          <Divider sx={{ my: 1.5 }} />
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+            <Typography variant="subtitle1" sx={{ minWidth: { md: 180 } }}>
+              ZIM Viewer Navigator
+            </Typography>
+            <TextField
+              size="small"
+              label="Filter Datasets"
+              placeholder="Wikipedia, DevDocs…"
+              value={kiwixCatalogFilter}
+              onChange={(e) => setKiwixCatalogFilter(e.target.value)}
+              fullWidth
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void loadKiwixCatalog()}
+              disabled={kiwixCatalogLoading}
+            >
+              {kiwixCatalogLoading ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          </Stack>
+          {kiwixCatalogError && (
+            <Alert severity="warning" sx={{ mt: 1.2 }}>
+              {kiwixCatalogError}
+            </Alert>
+          )}
+          {kiwixCatalogLoading ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.2 }}>
+              Loading catalog…
+            </Typography>
+          ) : visibleKiwixCatalogEntries.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.2 }}>
+              No catalog entries found yet.
+            </Typography>
+          ) : (
+            <Stack spacing={0.8} sx={{ mt: 1.2, maxHeight: 300, overflowY: 'auto', pr: 0.5 }}>
+              {visibleKiwixCatalogEntries.map((entry) => (
+                <Stack
+                  key={entry.id}
+                  direction={{ xs: 'column', md: 'row' }}
+                  justifyContent="space-between"
+                  spacing={1}
+                  sx={{ p: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}
+                >
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {entry.title || entry.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      {entry.summary || 'No description'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {(entry.category || 'uncategorized').toUpperCase()}
+                      {entry.language ? ` • ${entry.language.toUpperCase()}` : ''}
+                      {entry.updated ? ` • ${formatLocalDate(entry.updated)}` : ''}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => setKiwixViewUrl(entry.contentUrl)}
+                    >
+                      View Here
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="text"
+                      onClick={() => window.open(entry.contentUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      Open Tab
+                    </Button>
+                  </Stack>
+                </Stack>
+              ))}
+            </Stack>
+          )}
         </Paper>
       )}
 
@@ -552,6 +869,40 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
           <Typography variant="h6" sx={{ mb: 1 }}>
             OSM Visualizer
           </Typography>
+          <FormControlLabel
+            sx={{ mb: 1 }}
+            control={
+              <Switch
+                size="small"
+                checked={osmUseDownloadedView}
+                onChange={(e) => setOsmUseDownloadedView(e.target.checked)}
+                disabled={osmDownloadedFiles.length === 0}
+              />
+            }
+            label="Center map from downloaded dataset (no local rendering)"
+          />
+          {osmDownloadedFiles.length === 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              Download an `.osm` or `.osm.pbf` file first to enable downloaded dataset view.
+            </Typography>
+          )}
+          {osmUseDownloadedView && (
+            <FormControl size="small" sx={{ mb: 1.2, width: { xs: '100%', md: 420 } }}>
+              <InputLabel id="osm-dataset-label">Downloaded Dataset</InputLabel>
+              <Select
+                labelId="osm-dataset-label"
+                label="Downloaded Dataset"
+                value={osmSelectedDatasetPath}
+                onChange={(e) => setOsmSelectedDatasetPath(e.target.value)}
+              >
+                {osmDownloadedFiles.map((item) => (
+                  <MenuItem key={item.path} value={item.path}>
+                    {item.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.2 }}>
             <TextField
               type="number"
@@ -586,6 +937,11 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
           >
             <iframe title="OSM Visualizer" src={osmEmbedUrl} style={{ border: 0, width: '100%', height: '100%' }} />
           </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            {osmUseDownloadedView
+              ? 'This mode uses your downloaded file name to pick a map center/zoom when recognized. Tile rendering is still online OpenStreetMap.'
+              : 'Viewer uses OpenStreetMap online tiles.'}
+          </Typography>
         </Paper>
       )}
     </Stack>

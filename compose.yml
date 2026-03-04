@@ -71,13 +71,44 @@ services:
       - -c
       - |
         set -e
-        mkdir -p /data/user-files/maps/kiwix
+        LAST_HASH=""
+        SERVER_PID=""
         while true; do
-          FILES="$$(ls -1 /data/user-files/maps/kiwix/*.zim 2>/dev/null || true)"
-          if [ -n "$$FILES" ]; then
-            exec kiwix-serve --address=0.0.0.0 --port=8080 $$FILES
+          FILE_LIST="$$(find /data/user-files -type f -name '*.zim' 2>/dev/null | sort || true)"
+          if [ -z "$$FILE_LIST" ]; then
+            if [ -n "$$SERVER_PID" ]; then
+              kill "$$SERVER_PID" 2>/dev/null || true
+              wait "$$SERVER_PID" 2>/dev/null || true
+              SERVER_PID=""
+              LAST_HASH=""
+              echo "kiwix: stopped server (no ZIM files found)"
+            fi
+            echo "kiwix: waiting for .zim files under /data/user-files/*/maps/kiwix"
+            sleep 15
+            continue
           fi
-          echo "kiwix: waiting for .zim files in /data/user-files/maps/kiwix"
+
+          FILE_HASH="$$(printf '%s\n' "$$FILE_LIST" | sha256sum | cut -d' ' -f1)"
+          NEED_RESTART=0
+          if [ "$$FILE_HASH" != "$$LAST_HASH" ]; then
+            NEED_RESTART=1
+          fi
+          if [ -n "$$SERVER_PID" ] && ! kill -0 "$$SERVER_PID" 2>/dev/null; then
+            NEED_RESTART=1
+          fi
+
+          if [ "$$NEED_RESTART" -eq 1 ]; then
+            if [ -n "$$SERVER_PID" ]; then
+              kill "$$SERVER_PID" 2>/dev/null || true
+              wait "$$SERVER_PID" 2>/dev/null || true
+            fi
+            FILE_COUNT="$$(printf '%s\n' "$$FILE_LIST" | wc -l | tr -d ' ')"
+            echo "kiwix: starting server with $$FILE_COUNT ZIM file(s)"
+            sh -c 'find /data/user-files -type f -name "*.zim" -print0 | xargs -0 kiwix-serve --address=all --port=8080' &
+            SERVER_PID="$$!"
+            LAST_HASH="$$FILE_HASH"
+          fi
+
           sleep 15
         done
     ports:
