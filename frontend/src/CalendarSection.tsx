@@ -45,6 +45,10 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
       setError('Complete title, start, and end before creating an event.')
       return
     }
+    if (new Date(eventEnd).getTime() <= new Date(eventStart).getTime()) {
+      setError('Event end must be after the start time.')
+      return
+    }
     setCreatingEvent(true)
     await runSafe(setError, async () => {
       await api<CalendarEvent>(`/calendar/events/${encodeURIComponent(currentUsername)}`, {
@@ -95,7 +99,13 @@ export default function CalendarSection({ token, currentUsername, setError }: Se
               void onCreateEvent()
             }}
           >
-            <TextField label="Title" fullWidth value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} />
+            <TextField
+              label="Title"
+              placeholder="Event title…"
+              fullWidth
+              value={eventTitle}
+              onChange={(e) => setEventTitle(e.target.value)}
+            />
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2}>
               <TextField
                 label="Start"

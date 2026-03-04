@@ -410,6 +410,7 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
       <Button
         key={`file-${file.id}`}
         fullWidth
+        aria-label={`Open note file ${file.name}`}
         onClick={() => onSelectFile(file.id, normalizeFolderId(file.folder_id))}
         sx={{
           justifyContent: 'flex-start',
@@ -435,24 +436,22 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
     const children = foldersByParent.get(folder.id) ?? []
     return (
       <Box key={`folder-${folder.id}`}>
-        <Button
-          fullWidth
-          onClick={() => setSelectedFolderId(folder.id)}
+        <Box
           sx={{
-            justifyContent: 'flex-start',
-            textTransform: 'none',
-            pl: `${0.35 + depth * 1.4}rem`,
-            py: 0.45,
             borderRadius: 1,
             bgcolor: selectedFolderId === folder.id ? (t) => alpha(t.palette.secondary.main, 0.14) : 'transparent',
           }}
         >
-          <Stack direction="row" spacing={0.4} alignItems="center" sx={{ width: '100%' }}>
+          <Stack
+            direction="row"
+            spacing={0.35}
+            alignItems="center"
+            sx={{ pl: `${0.35 + depth * 1.4}rem`, pr: 0.35, py: 0.2 }}
+          >
             <IconButton
               size="small"
               aria-label={isExpanded ? `Collapse folder ${folder.name}` : `Expand folder ${folder.name}`}
-              onClick={(event) => {
-                event.stopPropagation()
+              onClick={() => {
                 setExpandedFolders((prev) => {
                   const next = new Set(prev)
                   if (next.has(folder.id)) next.delete(folder.id)
@@ -463,12 +462,27 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
             >
               {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
             </IconButton>
-            {isExpanded ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}
-            <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {folder.name}
-            </Typography>
+            <Button
+              fullWidth
+              aria-label={`Open folder ${folder.name}`}
+              onClick={() => setSelectedFolderId(folder.id)}
+              sx={{
+                justifyContent: 'flex-start',
+                textTransform: 'none',
+                py: 0.3,
+                borderRadius: 1,
+                minWidth: 0,
+              }}
+            >
+              <Stack direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>
+                {isExpanded ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}
+                <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {folder.name}
+                </Typography>
+              </Stack>
+            </Button>
           </Stack>
-        </Button>
+        </Box>
         {isExpanded && (
           <>
             {renderFiles(folder.id, depth + 1)}

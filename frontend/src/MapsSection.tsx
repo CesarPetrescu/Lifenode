@@ -486,44 +486,53 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {sourceName} presets for quick offline setup.
         </Typography>
-        <Stack spacing={1.2}>
-          {visiblePresets.map((preset) => (
-            <Card key={preset.id} variant="outlined">
-              <CardContent>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2} justifyContent="space-between">
-                  <Box>
-                    <Typography variant="subtitle1">{preset.title}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {preset.description}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Size: {preset.approx_size}
-                    </Typography>
-                  </Box>
-                  <Stack direction={{ xs: 'row', md: 'column' }} spacing={1} alignItems={{ md: 'flex-end' }}>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      startIcon={<DownloadIcon />}
-                      onClick={() => void onStartPreset(preset)}
-                      disabled={!!runningJob}
-                    >
-                      Download
-                    </Button>
-                    <Button
-                      variant="text"
-                      size="small"
-                      startIcon={<PublicIcon />}
-                      onClick={() => window.open(preset.url, '_blank', 'noopener,noreferrer')}
-                    >
-                      Source URL
-                    </Button>
+        {visiblePresets.length === 0 ? (
+          <Alert severity="warning" sx={{ mb: 1.2 }}>
+            Presets are unavailable right now. Refresh the page and try again.
+          </Alert>
+        ) : (
+          <Stack spacing={1.2}>
+            {visiblePresets.map((preset) => (
+              <Card key={preset.id} variant="outlined">
+                <CardContent>
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2} justifyContent="space-between">
+                    <Box>
+                      <Typography variant="subtitle1">{preset.title}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {preset.description}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Size: {preset.approx_size}
+                      </Typography>
+                    </Box>
+                    <Stack direction={{ xs: 'row', md: 'column' }} spacing={1} alignItems={{ md: 'flex-end' }}>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        startIcon={<DownloadIcon />}
+                        onClick={() => void onStartPreset(preset)}
+                        disabled={!!runningJob}
+                      >
+                        Download
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="small"
+                        startIcon={<PublicIcon />}
+                        component="a"
+                        href={preset.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Source URL
+                      </Button>
+                    </Stack>
                   </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
-          ))}
-        </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        )}
 
         <Divider sx={{ my: 2 }} />
 
@@ -533,6 +542,7 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
           <TextField
             label="Direct download URL"
+            placeholder={isWikiMode ? 'https://download.kiwix.org/zim/…' : 'https://download.geofabrik.de/…'}
             value={customUrl}
             onChange={(e) => setCustomUrl(e.target.value)}
             fullWidth
@@ -544,6 +554,7 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
           />
           <TextField
             label="File name (optional)"
+            placeholder={isWikiMode ? 'wikipedia_en_….zim' : 'romania-latest.osm.pbf'}
             value={customFileName}
             onChange={(e) => setCustomFileName(e.target.value)}
             sx={{ width: { xs: '100%', md: 240 } }}
@@ -552,6 +563,7 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mt: 1 }}>
           <TextField
             label="Label (optional)"
+            placeholder="Friendly label…"
             value={customLabel}
             onChange={(e) => setCustomLabel(e.target.value)}
             fullWidth
@@ -594,7 +606,10 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
                   size="small"
                   variant="text"
                   startIcon={<PublicIcon />}
-                  onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                  component="a"
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   Open Source
                 </Button>
@@ -852,7 +867,10 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
                     <Button
                       size="small"
                       variant="text"
-                      onClick={() => window.open(entry.contentUrl, '_blank', 'noopener,noreferrer')}
+                      component="a"
+                      href={entry.contentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
                     >
                       Open Tab
                     </Button>

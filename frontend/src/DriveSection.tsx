@@ -415,6 +415,7 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
       <Button
         key={`file-${file.path}`}
         fullWidth
+        aria-label={`Open file ${file.name}`}
         onClick={() => {
           setSelectedFolderPath(file.parent_path ?? null)
           setSelectedFilePath(file.path)
@@ -446,24 +447,22 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
     const children = foldersByParent.get(folder.path) ?? []
     return (
       <Box key={`folder-${folder.path}`}>
-        <Button
-          fullWidth
-          onClick={() => setSelectedFolderPath(folder.path)}
+        <Box
           sx={{
-            justifyContent: 'space-between',
-            textTransform: 'none',
-            pl: `${0.35 + depth * 1.35}rem`,
-            py: 0.45,
             borderRadius: 1,
             bgcolor: selectedFolderPath === folder.path ? (t) => alpha(t.palette.secondary.main, 0.15) : 'transparent',
           }}
         >
-          <Stack direction="row" spacing={0.35} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+          <Stack
+            direction="row"
+            spacing={0.35}
+            alignItems="center"
+            sx={{ pl: `${0.35 + depth * 1.35}rem`, pr: 0.35, py: 0.2 }}
+          >
             <IconButton
               size="small"
               aria-label={isExpanded ? `Collapse folder ${folder.name}` : `Expand folder ${folder.name}`}
-              onClick={(event) => {
-                event.stopPropagation()
+              onClick={() => {
                 setExpandedFolders((prev) => {
                   const next = new Set(prev)
                   if (next.has(folder.path)) next.delete(folder.path)
@@ -474,23 +473,37 @@ export default function DriveSection({ token, currentUsername, setError }: Secti
             >
               {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
             </IconButton>
-            {isExpanded ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}
-            <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {folder.name}
-            </Typography>
+            <Button
+              fullWidth
+              aria-label={`Open folder ${folder.name}`}
+              onClick={() => setSelectedFolderPath(folder.path)}
+              sx={{
+                justifyContent: 'flex-start',
+                textTransform: 'none',
+                py: 0.3,
+                borderRadius: 1,
+                minWidth: 0,
+              }}
+            >
+              <Stack direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>
+                {isExpanded ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}
+                <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {folder.name}
+                </Typography>
+              </Stack>
+            </Button>
+            <IconButton
+              size="small"
+              color="error"
+              aria-label={`Delete folder ${folder.name}`}
+              onClick={() => {
+                void onDeleteFolder(folder.path)
+              }}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
           </Stack>
-          <IconButton
-            size="small"
-            color="error"
-            aria-label={`Delete folder ${folder.name}`}
-            onClick={(event) => {
-              event.stopPropagation()
-              void onDeleteFolder(folder.path)
-            }}
-          >
-            <DeleteIcon fontSize="small" />
-          </IconButton>
-        </Button>
+        </Box>
         {isExpanded && (
           <>
             {renderFiles(folder.path, depth + 1)}

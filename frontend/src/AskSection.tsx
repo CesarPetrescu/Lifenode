@@ -33,6 +33,8 @@ import type {
 } from './types'
 import { API_BASE, api, authHeaders, formatChatTime, formatLocalDate, nextMsgId } from './utils'
 
+const ASK_WIKI_RETRIEVAL_KEY = 'lifenode_ask_wiki_retrieval'
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -59,6 +61,7 @@ export default function AskSection({ token, currentUsername, setError }: Section
 
   const [askQuestion, setAskQuestion] = useState('')
   const [askThinking, setAskThinking] = useState(false)
+  const [askWikiRetrieval, setAskWikiRetrieval] = useState<boolean>(() => localStorage.getItem(ASK_WIKI_RETRIEVAL_KEY) === '1')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [askLoading, setAskLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -68,6 +71,10 @@ export default function AskSection({ token, currentUsername, setError }: Section
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [chatMessages])
+
+  useEffect(() => {
+    localStorage.setItem(ASK_WIKI_RETRIEVAL_KEY, askWikiRetrieval ? '1' : '0')
+  }, [askWikiRetrieval])
 
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
@@ -241,7 +248,7 @@ export default function AskSection({ token, currentUsername, setError }: Section
           username: currentUsername,
           question: questionText,
           thinking: askThinking,
-          use_wiki_retrieval: false,
+          use_wiki_retrieval: askWikiRetrieval,
           thread_id: activeThreadId,
         }),
       })
@@ -366,25 +373,25 @@ export default function AskSection({ token, currentUsername, setError }: Section
   }
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: { xs: 'column', md: 'row' },
-        height: { xs: 'calc(100dvh - 140px)', md: 'calc(100dvh - 120px)' },
-        mx: -1.5,
-      }}
-    >
+    <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
       <Box
         sx={{
-          width: { xs: '100%', md: 320 },
-          borderRight: { xs: 0, md: 1 },
-          borderBottom: { xs: 1, md: 0 },
-          borderColor: 'divider',
           display: 'flex',
-          flexDirection: 'column',
-          minHeight: 0,
+          flexDirection: { xs: 'column', md: 'row' },
+          height: { xs: 'calc(100dvh - 140px)', md: 'calc(100dvh - 170px)' },
         }}
       >
+        <Box
+          sx={{
+            width: { xs: '100%', md: 320 },
+            borderRight: { xs: 0, md: 1 },
+            borderBottom: { xs: 1, md: 0 },
+            borderColor: 'divider',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+          }}
+        >
         <Box sx={{ p: 1.5 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between">
             <Typography variant="h6">Chats</Typography>
@@ -464,9 +471,9 @@ export default function AskSection({ token, currentUsername, setError }: Section
             </Stack>
           )}
         </Box>
-      </Box>
+        </Box>
 
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Box
           sx={{
             flex: 1,
@@ -614,6 +621,20 @@ export default function AskSection({ token, currentUsername, setError }: Section
                 </Typography>
               }
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={askWikiRetrieval}
+                  onChange={(e) => setAskWikiRetrieval(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  {askWikiRetrieval ? 'Wiki Retrieval: On' : 'Wiki Retrieval: Off'}
+                </Typography>
+              }
+            />
           </Stack>
           <Stack
             component="form"
@@ -653,7 +674,8 @@ export default function AskSection({ token, currentUsername, setError }: Section
             </Button>
           </Stack>
         </Paper>
+        </Box>
       </Box>
-    </Box>
+    </Paper>
   )
 }

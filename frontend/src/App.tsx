@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import {
   Alert,
   AppBar,
@@ -62,6 +62,12 @@ function readSectionFromUrl(): AppSection | null {
   return isAppSection(raw) ? raw : null
 }
 
+function buildSectionHref(next: AppSection): string {
+  const url = new URL(window.location.href)
+  url.searchParams.set(SECTION_QUERY_KEY, next)
+  return `${url.pathname}?${url.searchParams.toString()}${url.hash}`
+}
+
 function App() {
   const theme = useTheme()
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
@@ -114,6 +120,24 @@ function App() {
     setSection(next)
     updateSectionUrl(next, replace)
   }, [updateSectionUrl])
+
+  const onSectionNavClick = useCallback((event: MouseEvent<HTMLAnchorElement>, next: AppSection) => {
+    if (
+      event.button !== 0
+      || event.metaKey
+      || event.ctrlKey
+      || event.shiftKey
+      || event.altKey
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    setSectionWithUrl(next)
+    if (!isDesktop) {
+      setDrawerOpen(false)
+    }
+  }, [isDesktop, setSectionWithUrl])
 
   const clearSession = useCallback(() => {
     localStorage.removeItem('lifenode_token')
@@ -249,17 +273,15 @@ function App() {
         </Typography>
       </Box>
       <Divider />
-      <List sx={{ pt: 0.5 }}>
+      <List component="nav" aria-label="Primary navigation" sx={{ pt: 0.5 }}>
         {navigationItems.map((item) => (
           <ListItem key={item.key} disablePadding>
             <ListItemButton
+              component="a"
+              href={buildSectionHref(item.key)}
+              aria-current={section === item.key ? 'page' : undefined}
               selected={section === item.key}
-              onClick={() => {
-                setSectionWithUrl(item.key)
-                if (!isDesktop) {
-                  setDrawerOpen(false)
-                }
-              }}
+              onClick={(event: MouseEvent<HTMLAnchorElement>) => onSectionNavClick(event, item.key)}
               sx={{
                 mx: 1,
                 mb: 0.5,
@@ -409,11 +431,10 @@ function App() {
           tabIndex={-1}
           sx={{
             flexGrow: 1,
+            minWidth: 0,
             pt: '76px',
             px: { xs: 1.5, md: 3 },
             pb: 3,
-            ml: { md: `${DRAWER_WIDTH}px` },
-            width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
           }}
         >
           <Container maxWidth="xl">

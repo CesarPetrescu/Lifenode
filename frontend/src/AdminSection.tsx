@@ -37,6 +37,13 @@ export default function AdminSection({ token, authUser, setAuthUser, setError }:
 
   const onToggleAdminRole = async (targetUser: AdminUser) => {
     if (!authUser.is_admin || !token) return
+    if (
+      targetUser.is_admin
+      && targetUser.id === authUser.id
+      && !window.confirm('You are about to revoke your own admin access. Continue?')
+    ) {
+      return
+    }
     setAdminBusyId(targetUser.id)
     await runSafe(setError, async () => {
       await api(`/auth/users/${targetUser.id}/role`, {
