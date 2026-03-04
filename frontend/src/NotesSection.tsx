@@ -697,6 +697,7 @@ export default function NotesSection({ token, currentUsername, setError }: Secti
                     multiline
                     fullWidth
                     minRows={16}
+                    label="Markdown Content"
                     value={draftContent}
                     onChange={(e) => setDraftContent(e.target.value)}
                     placeholder="Write markdown…"

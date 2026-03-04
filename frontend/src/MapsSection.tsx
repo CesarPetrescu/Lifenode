@@ -765,7 +765,10 @@ export default function MapsSection({ token, currentUsername, setError, mode }: 
             </Button>
             <Button
               variant="outlined"
-              onClick={() => window.open(kiwixViewerUrl, '_blank', 'noopener,noreferrer')}
+              component="a"
+              href={kiwixViewerUrl.trim() ? kiwixViewerUrl : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
               disabled={!kiwixViewerUrl.trim()}
             >
               Open Fullscreen

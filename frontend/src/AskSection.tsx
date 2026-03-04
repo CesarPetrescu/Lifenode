@@ -4,6 +4,10 @@ import {
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Fade,
   FormControlLabel,
   IconButton,
@@ -64,6 +68,11 @@ export default function AskSection({ token, currentUsername, setError }: Section
   const [askWikiRetrieval, setAskWikiRetrieval] = useState<boolean>(() => localStorage.getItem(ASK_WIKI_RETRIEVAL_KEY) === '1')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [askLoading, setAskLoading] = useState(false)
+  const [renameThreadId, setRenameThreadId] = useState<number | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [renamingThread, setRenamingThread] = useState(false)
+  const [deleteThread, setDeleteThread] = useState<AskThread | null>(null)
+  const [deletingThread, setDeletingThread] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -148,29 +157,41 @@ export default function AskSection({ token, currentUsername, setError }: Section
     }
   }
 
-  const onRenameThread = async (thread: AskThread) => {
-    if (!currentUsername || !token) return
-    const nextTitle = window.prompt('Rename chat…', thread.title)?.trim()
+  const onOpenRenameThread = (thread: AskThread) => {
+    setRenameThreadId(thread.id)
+    setRenameDraft(thread.title)
+  }
+
+  const onRenameThread = async () => {
+    if (!currentUsername || !token || !renameThreadId) return
+    const nextTitle = renameDraft.trim()
     if (!nextTitle) return
+    setRenamingThread(true)
     try {
       setError('')
       await api<AskThread>(
-        `/ask/threads/${encodeURIComponent(currentUsername)}/${thread.id}`,
+        `/ask/threads/${encodeURIComponent(currentUsername)}/${renameThreadId}`,
         {
           method: 'PUT',
           headers: authHeaders(token, { 'Content-Type': 'application/json' }),
           body: JSON.stringify({ title: nextTitle }),
         },
       )
-      await loadThreads(thread.id)
+      setRenameThreadId(null)
+      setRenameDraft('')
+      await loadThreads(renameThreadId)
     } catch (err) {
       setError(errorMessage(err))
+    } finally {
+      setRenamingThread(false)
     }
   }
 
-  const onDeleteThread = async (threadId: number) => {
+  const onDeleteThread = async () => {
+    const threadId = deleteThread?.id
     if (!currentUsername || !token) return
-    if (!window.confirm('Delete this chat and its messages?')) return
+    if (!threadId) return
+    setDeletingThread(true)
     try {
       setError('')
       await api(
@@ -184,9 +205,12 @@ export default function AskSection({ token, currentUsername, setError }: Section
         setSelectedThreadId(null)
         setChatMessages([])
       }
+      setDeleteThread(null)
       await loadThreads()
     } catch (err) {
       setError(errorMessage(err))
+    } finally {
+      setDeletingThread(false)
     }
   }
 
@@ -455,12 +479,12 @@ export default function AskSection({ token, currentUsername, setError }: Section
                     </Box>
                     <Stack direction="row" spacing={0.5}>
                       <Tooltip title="Rename…">
-                        <IconButton size="small" aria-label={`Rename chat ${thread.title}`} onClick={() => void onRenameThread(thread)}>
+                        <IconButton size="small" aria-label={`Rename chat ${thread.title}`} onClick={() => onOpenRenameThread(thread)}>
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Delete chat">
-                        <IconButton size="small" color="error" aria-label={`Delete chat ${thread.title}`} onClick={() => void onDeleteThread(thread.id)}>
+                        <IconButton size="small" color="error" aria-label={`Delete chat ${thread.title}`} onClick={() => setDeleteThread(thread)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
@@ -650,6 +674,7 @@ export default function AskSection({ token, currentUsername, setError }: Section
               fullWidth
               multiline
               maxRows={4}
+              label="Message"
               placeholder="Ask a question…"
               value={askQuestion}
               onChange={(e) => setAskQuestion(e.target.value)}
@@ -676,6 +701,60 @@ export default function AskSection({ token, currentUsername, setError }: Section
         </Paper>
         </Box>
       </Box>
+
+      <Dialog open={renameThreadId != null} onClose={() => setRenameThreadId(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Rename Chat</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Chat title"
+            placeholder="Chat title…"
+            value={renameDraft}
+            onChange={(e) => setRenameDraft(e.target.value)}
+            sx={{ mt: 0.5 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setRenameThreadId(null)
+              setRenameDraft('')
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void onRenameThread()}
+            disabled={renamingThread || !renameDraft.trim()}
+            startIcon={renamingThread ? <CircularProgress size={14} color="inherit" /> : undefined}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteThread != null} onClose={() => setDeleteThread(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete Chat</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Delete chat "{deleteThread?.title ?? ''}" and all its messages?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteThread(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => void onDeleteThread()}
+            disabled={deletingThread}
+            startIcon={deletingThread ? <CircularProgress size={14} color="inherit" /> : undefined}
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Paper>
   )
 }
