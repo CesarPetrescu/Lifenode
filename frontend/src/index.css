@@ -1,4 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap');
+
+:root {
+  --lifenode-accent: #1d4ed8;
+  --lifenode-accent-soft: rgba(29, 78, 216, 0.16);
+  --lifenode-glow: rgba(194, 65, 12, 0.12);
+  --lifenode-grid: rgba(20, 32, 51, 0.08);
+}
 
 * {
   box-sizing: border-box;
@@ -7,12 +14,58 @@
 html {
   color-scheme: light;
   -webkit-text-size-adjust: 100%;
+  min-height: 100%;
+  background: #f5f1e8;
 }
 
 body {
   margin: 0;
+  min-height: 100dvh;
   transition: background-color 0.3s ease, color 0.3s ease;
   text-rendering: optimizeLegibility;
+  font-feature-settings: 'ss01' 1, 'cv09' 1;
+  background:
+    radial-gradient(circle at top left, var(--lifenode-accent-soft), transparent 32%),
+    radial-gradient(circle at 85% 8%, var(--lifenode-glow), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(245, 241, 232, 0.98));
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', 'Consolas', monospace;
+}
+
+::selection {
+  background: rgba(29, 78, 216, 0.22);
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(20, 32, 51, 0.18);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 32, 51, 0.28);
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 a,
@@ -74,6 +127,17 @@ select,
 
 .skip-link:focus-visible {
   top: 12px;
+}
+
+@keyframes lifenodeFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(18px, -12px, 0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

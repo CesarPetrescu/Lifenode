@@ -12,7 +12,7 @@ It runs as a single web app with:
 ## What You Get
 
 - Authenticated multi-user app with optional admin bootstrap.
-- `Wiki` tab: Kiwix Wikipedia download center + embedded Kiwix viewer.
+- `Wiki` tab: Kiwix download center + embedded viewer, plus indexed-article tools for semantic search and Ask retrieval.
 - `Maps` tab: OpenStreetMap download center + embedded OSM visualizer.
 - Download job system for maps/wiki payloads (queue, progress, cancel, delete logs, delete files).
 - `Ask` tab with:
@@ -20,6 +20,7 @@ It runs as a single web app with:
   - thread create/rename/delete
   - streaming assistant responses over SSE (`/api/ask/stream`)
   - optional model "thinking" mode
+  - live Qwen 0.8B / 2B model switching with unload + reload
 - `Notes` tab with folder tree, file management, markdown editing, and live preview.
 - `Drive` tab with folder/file operations and rich file preview.
 - Drive viewer supports Markdown, text, PDF, image, audio, and video formats.
@@ -34,7 +35,7 @@ Browser (React + MUI)
         v
 Rust API (Axum)  ---> SQLite (user/files + metadata)
         |
-        +---> llama-qwen (chat, OpenAI-compatible endpoint)
+        +---> llama-qwen manager (loads Qwen 0.8B / 2B / 4B into llama.cpp)
         +---> llama-embed (embeddings, OpenAI-compatible endpoint)
         +---> Kiwix service (serves downloaded .zim files)
 ```
@@ -52,11 +53,21 @@ mkdir -p user-files models
 
 # put your models in ./models
 # - Qwen3.5-0.8B-UD-Q3_K_XL.gguf
+# - Qwen3.5-2B-UD-Q4_K_XL.gguf
+# - Qwen3.5-4B-UD-Q3_K_XL.gguf
 # - embeddinggemma-300M-Q8_0.gguf
 
 docker compose up --build -d
 docker compose ps
 ```
+
+On small hosts, start with the shipped defaults. They bias for stability:
+
+- Qwen `0.8B` stays at `4096` context.
+- Qwen `2B` drops to `2048` context.
+- Qwen `4B` drops to `1024` context.
+- `mmap` stays enabled and `mlock` stays off by default.
+- The Qwen manager refuses model switches that exceed the current memory budget.
 
 Open:
 
@@ -76,7 +87,7 @@ If your Wi-Fi interface is not `wlan0`, replace it (for example `wlp2s0`).
 `compose.yml` runs 4 services:
 
 - `lifenode`: backend API + bundled frontend
-- `llama-qwen`: chat inference
+- `llama-qwen`: chat model manager for Qwen 0.8B / 2B / 4B
 - `llama-embed`: embeddings
 - `kiwix`: serves local `.zim` files on port `8081`
 
@@ -141,6 +152,7 @@ llama.cpp endpoints:
 - `LIFENODE_LLAMACPP_EMBED_MODEL`
 - `LIFENODE_LLAMACPP_CHAT_URL`
 - `LIFENODE_LLAMACPP_CHAT_MODEL`
+- `LIFENODE_LLAMACPP_MANAGER_URL`
 - `LIFENODE_LLAMACPP_API_KEY`
 - `LIFENODE_LLAMACPP_CHAT_MAX_TOKENS`
 - `LIFENODE_LLAMACPP_CHAT_TIMEOUT_SECS`
@@ -148,11 +160,24 @@ llama.cpp endpoints:
 
 llama.cpp container runtime:
 
-- `LLAMACPP_QWEN_MODEL_PATH`
+- `LLAMACPP_QWEN_DEFAULT_MODEL_ID`
+- `LLAMACPP_QWEN_0_8B_MODEL_PATH`
+- `LLAMACPP_QWEN_2B_MODEL_PATH`
+- `LLAMACPP_QWEN_4B_MODEL_PATH`
 - `LLAMACPP_EMBED_MODEL_PATH`
-- `LLAMACPP_QWEN_CTX`
+- `LLAMACPP_QWEN_0_8B_CTX`
+- `LLAMACPP_QWEN_2B_CTX`
+- `LLAMACPP_QWEN_4B_CTX`
 - `LLAMACPP_EMBED_CTX`
 - `LLAMACPP_NGL`
+- `LLAMACPP_NO_MMAP`
+- `LLAMACPP_MLOCK`
+- `LLAMACPP_EMBED_NO_MMAP`
+- `LLAMACPP_EMBED_MLOCK`
+- `LLAMACPP_MEMORY_GUARD_ENABLED`
+- `LLAMACPP_MEMORY_GUARD_HEADROOM_MIB` (default `1536`)
+- `LLAMACPP_CONTEXT_OVERHEAD_PER_TOKEN_KIB`
+- `LLAMACPP_RUNTIME_OVERHEAD_MIB`
 
 ## API Overview
 
@@ -161,7 +186,7 @@ Main route groups:
 - Auth: `/api/auth/*`
 - Ask + chat threads: `/api/ask/*`
 - Maps/wiki download center: `/api/maps/*`
-- Legacy wiki indexing/search endpoints: `/api/wiki/*`, `/api/search`
+- Wiki indexing/search endpoints: `/api/wiki/*`, `/api/search`
 - Notes: `/api/notes/*`
 - Drive: `/api/drive/*`
 - Calendar: `/api/calendar/*`
@@ -202,3 +227,8 @@ docker compose ps
   - Confirm `kiwix` container is running and `LIFENODE_KIWIX_EMBED_URL` is reachable.
 - Chat answers are fallback-style:
   - Check `GET /api/health`; if llama services are unavailable, backend falls back to deterministic embeddings and retrieval-only behavior.
+- Model switch takes a while:
+  - The Ask composer now shows runtime status. Sending is disabled until the selected model finishes loading.
+- `2B` or `4B` is disabled in Ask:
+  - The manager now blocks unsafe loads when current RAM, context size, and runtime flags make a switch risky.
+  - On a `4 GiB` host, keep `LLAMACPP_NO_MMAP=0` and `LLAMACPP_MLOCK=0`, and expect `4B` to stay blocked unless you move to a larger machine.

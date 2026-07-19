@@ -1,6 +1,9 @@
 .DS_Store
 .env
 
+__pycache__/
+*.py[cod]
+
 backend/target/
 
 frontend/node_modules/

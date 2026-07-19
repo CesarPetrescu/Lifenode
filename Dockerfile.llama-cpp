@@ -16,17 +16,19 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_SERVER=ON && \
     cmake --build build --config Release --target llama-server -j"$(nproc)"
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libgomp1 \
-    libc-bin \
-    && rm -rf /var/lib/apt/lists/*
+ARG INCLUDE_MANAGER=0
+RUN apt-get update && \
+    packages="ca-certificates libgomp1 libc-bin"; \
+    if [ "$INCLUDE_MANAGER" = "1" ]; then packages="$packages python3"; fi; \
+    apt-get install -y --no-install-recommends $packages && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=builder /src/llama.cpp/build/bin/libggml*.so* /usr/local/lib/
 COPY --from=builder /src/llama.cpp/build/bin/libllama*.so* /usr/local/lib/
 COPY --from=builder /src/llama.cpp/build/bin/libmtmd*.so* /usr/local/lib/
-RUN ldconfig
+COPY scripts/lifenode-qwen-manager.py /usr/local/bin/lifenode-qwen-manager.py
+RUN chmod +x /usr/local/bin/lifenode-qwen-manager.py && ldconfig
 
 EXPOSE 8080
 ENTRYPOINT ["llama-server"]

@@ -39,6 +39,11 @@ pub struct AskRequest {
 }
 
 #[derive(Deserialize)]
+pub struct AskModelSelectRequest {
+    pub model_id: String,
+}
+
+#[derive(Deserialize)]
 pub struct MapDownloadStartRequest {
     pub preset_id: Option<String>,
     pub source: Option<String>,
@@ -236,6 +241,36 @@ pub struct AskThreadDetailItem {
     pub created_at: String,
     pub updated_at: String,
     pub messages: Vec<AskMessageItem>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AskModelItem {
+    pub id: String,
+    pub label: String,
+    pub filename: String,
+    pub context_length: u32,
+    pub description: String,
+    pub available: bool,
+    pub selectable: bool,
+    pub availability_reason: Option<String>,
+    pub estimated_ram_mib: Option<u32>,
+    pub required_free_ram_mib: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AskModelStatusResponse {
+    pub manager_enabled: bool,
+    pub switchable: bool,
+    pub shared_runtime: bool,
+    pub state: String,
+    pub active_model_id: Option<String>,
+    pub desired_model_id: Option<String>,
+    pub last_error: Option<String>,
+    pub models: Vec<AskModelItem>,
+    pub fast_sampling: QwenSamplingPreset,
+    pub thinking_sampling: QwenSamplingPreset,
+    pub default_thinking: bool,
+    pub max_tokens: u32,
 }
 
 #[derive(Serialize)]

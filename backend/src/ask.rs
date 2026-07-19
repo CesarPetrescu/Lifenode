@@ -17,7 +17,9 @@ use tracing::warn;
 use crate::auth::{authorize_username, require_auth};
 use crate::error::{AppError, AppResult, internal_error};
 use crate::search::rank_chunks;
-use crate::state::{AppState, DEFAULT_TOP_K, LlamaChatConfig, QwenSamplingPreset};
+use crate::state::{
+    AppState, DEFAULT_TOP_K, LlamaChatConfig, QwenSamplingPreset, qwen_sampling_preset,
+};
 use crate::types::{
     AskMessageItem, AskRequest, AskThreadCreateRequest, AskThreadDetailItem, AskThreadItem,
     AskThreadRenameRequest, SearchResultItem,
@@ -422,7 +424,8 @@ async fn stream_chat_with_llama_cpp(
     tx: &tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
 ) -> Result<String, String> {
     let sampling = qwen_sampling_preset(thinking);
-    let (system_prompt, user_prompt) = build_chat_prompts(question, contexts, use_wiki_retrieval);
+    let (system_prompt, user_prompt) =
+        build_chat_prompts(question, contexts, use_wiki_retrieval, thinking);
 
     let mut payload = json!({
         "messages": [
@@ -556,7 +559,8 @@ async fn chat_with_llama_cpp(
     use_wiki_retrieval: bool,
 ) -> Result<String, String> {
     let sampling = qwen_sampling_preset(thinking);
-    let (system_prompt, user_prompt) = build_chat_prompts(question, contexts, use_wiki_retrieval);
+    let (system_prompt, user_prompt) =
+        build_chat_prompts(question, contexts, use_wiki_retrieval, thinking);
 
     let mut payload = json!({
         "messages": [
@@ -630,7 +634,13 @@ fn build_chat_prompts(
     question: &str,
     contexts: &[SearchResultItem],
     use_wiki_retrieval: bool,
+    thinking: bool,
 ) -> (String, String) {
+    let reasoning_instruction = if thinking {
+        " Think carefully before answering, but keep any internal reasoning private and return only the final answer."
+    } else {
+        ""
+    };
     if use_wiki_retrieval {
         let context_block = contexts
             .iter()
@@ -647,16 +657,22 @@ fn build_chat_prompts(
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        let system_prompt = "You are LifeNode local assistant. Use only the provided context. If the answer is not present in context, explicitly say you do not know.";
+        let system_prompt = format!(
+            "You are LifeNode local assistant. Use only the provided context. If the answer is not present in context, explicitly say you do not know.{}",
+            reasoning_instruction
+        );
         let user_prompt = format!(
             "Question:\n{}\n\nContext:\n{}\n\nAnswer concisely and cite relevant context points.",
             question, context_block
         );
-        (system_prompt.to_string(), user_prompt)
+        (system_prompt, user_prompt)
     } else {
-        let system_prompt = "You are LifeNode local assistant. Answer clearly and concisely.";
+        let system_prompt = format!(
+            "You are LifeNode local assistant. Answer clearly and concisely.{}",
+            reasoning_instruction
+        );
         let user_prompt = format!("Question:\n{}\n\nAnswer clearly and concisely.", question);
-        (system_prompt.to_string(), user_prompt)
+        (system_prompt, user_prompt)
     }
 }
 
@@ -700,30 +716,6 @@ fn retrieval_answer_fallback(question: &str, contexts: &[SearchResultItem]) -> S
     text.push_str("Question: ");
     text.push_str(question);
     text
-}
-
-fn qwen_sampling_preset(thinking: bool) -> QwenSamplingPreset {
-    if thinking {
-        QwenSamplingPreset {
-            temperature: 1.0,
-            top_p: 0.95,
-            top_k: 20,
-            min_p: 0.0,
-            presence_penalty: 1.5,
-            repetition_penalty: 1.0,
-            enable_thinking: true,
-        }
-    } else {
-        QwenSamplingPreset {
-            temperature: 1.0,
-            top_p: 1.0,
-            top_k: 20,
-            min_p: 0.0,
-            presence_penalty: 2.0,
-            repetition_penalty: 1.0,
-            enable_thinking: false,
-        }
-    }
 }
 
 async fn ensure_thread_for_question(

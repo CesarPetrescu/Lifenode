@@ -19,22 +19,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.llama-cpp
+      args:
+        INCLUDE_MANAGER: "1"
     restart: unless-stopped
     ulimits:
       memlock: -1
-    command:
-      - -m
-      - ${LLAMACPP_QWEN_MODEL_PATH:-/models/Qwen3.5-0.8B-UD-Q3_K_XL.gguf}
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - -c
-      - ${LLAMACPP_QWEN_CTX:-4096}
-      - -ngl
-      - ${LLAMACPP_NGL:-0}
-      - --no-mmap
-      - --mlock
+    entrypoint:
+      - python3
+      - /usr/local/bin/lifenode-qwen-manager.py
+    environment:
+      LLAMACPP_MANAGER_HOST: 0.0.0.0
+      LLAMACPP_MANAGER_PORT: "8080"
+      LLAMACPP_INTERNAL_HOST: 0.0.0.0
+      LLAMACPP_INTERNAL_PORT: "8081"
+      LLAMACPP_DEFAULT_MODEL_ID: ${LLAMACPP_QWEN_DEFAULT_MODEL_ID:-qwen3.5-0.8b}
+      LLAMACPP_QWEN_0_8B_MODEL_PATH: ${LLAMACPP_QWEN_0_8B_MODEL_PATH:-/models/Qwen3.5-0.8B-UD-Q3_K_XL.gguf}
+      LLAMACPP_QWEN_2B_MODEL_PATH: ${LLAMACPP_QWEN_2B_MODEL_PATH:-/models/Qwen3.5-2B-UD-Q4_K_XL.gguf}
+      LLAMACPP_QWEN_4B_MODEL_PATH: ${LLAMACPP_QWEN_4B_MODEL_PATH:-/models/Qwen3.5-4B-UD-Q3_K_XL.gguf}
+      LLAMACPP_QWEN_0_8B_CTX: ${LLAMACPP_QWEN_0_8B_CTX:-4096}
+      LLAMACPP_QWEN_2B_CTX: ${LLAMACPP_QWEN_2B_CTX:-2048}
+      LLAMACPP_QWEN_4B_CTX: ${LLAMACPP_QWEN_4B_CTX:-1024}
+      LLAMACPP_NGL: ${LLAMACPP_NGL:-0}
+      LLAMACPP_NO_MMAP: ${LLAMACPP_NO_MMAP:-0}
+      LLAMACPP_MLOCK: ${LLAMACPP_MLOCK:-0}
+      LLAMACPP_MEMORY_GUARD_ENABLED: ${LLAMACPP_MEMORY_GUARD_ENABLED:-1}
+      LLAMACPP_MEMORY_GUARD_HEADROOM_MIB: ${LLAMACPP_MEMORY_GUARD_HEADROOM_MIB:-1536}
+      LLAMACPP_CONTEXT_OVERHEAD_PER_TOKEN_KIB: ${LLAMACPP_CONTEXT_OVERHEAD_PER_TOKEN_KIB:-128}
+      LLAMACPP_RUNTIME_OVERHEAD_MIB: ${LLAMACPP_RUNTIME_OVERHEAD_MIB:-192}
     volumes:
       - ./models:/models:ro
 
@@ -42,23 +53,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.llama-cpp
+      args:
+        INCLUDE_MANAGER: "0"
     restart: unless-stopped
     ulimits:
       memlock: -1
-    command:
-      - -m
-      - ${LLAMACPP_EMBED_MODEL_PATH:-/models/embeddinggemma-300M-Q8_0.gguf}
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --embeddings
-      - -c
-      - ${LLAMACPP_EMBED_CTX:-2048}
-      - -ngl
-      - ${LLAMACPP_NGL:-0}
-      - --no-mmap
-      - --mlock
+    entrypoint:
+      - sh
+      - -lc
+      - |
+        set -eu
+        set -- \
+          -m "${LLAMACPP_EMBED_MODEL_PATH:-/models/embeddinggemma-300M-Q8_0.gguf}" \
+          --host 0.0.0.0 \
+          --port 8080 \
+          --embeddings \
+          -c "${LLAMACPP_EMBED_CTX:-2048}" \
+          -ngl "${LLAMACPP_NGL:-0}"
+        if [ "$$LLAMACPP_EMBED_NO_MMAP" = "1" ]; then
+          set -- "$$@" --no-mmap
+        fi
+        if [ "$$LLAMACPP_EMBED_MLOCK" = "1" ]; then
+          set -- "$$@" --mlock
+        fi
+        exec llama-server "$$@"
+    environment:
+      LLAMACPP_EMBED_NO_MMAP: ${LLAMACPP_EMBED_NO_MMAP:-0}
+      LLAMACPP_EMBED_MLOCK: ${LLAMACPP_EMBED_MLOCK:-0}
     volumes:
       - ./models:/models:ro
 

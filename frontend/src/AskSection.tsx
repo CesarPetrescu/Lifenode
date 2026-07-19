@@ -3,6 +3,7 @@ import {
   Avatar,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -11,6 +12,7 @@ import {
   Fade,
   FormControlLabel,
   IconButton,
+  LinearProgress,
   Paper,
   Stack,
   Switch,
@@ -29,6 +31,7 @@ import SendIcon from '@mui/icons-material/Send'
 import ChatIcon from '@mui/icons-material/Chat'
 
 import type {
+  AskModelStatus,
   AskSampling,
   AskThread,
   AskThreadDetail,
@@ -68,6 +71,9 @@ export default function AskSection({ token, currentUsername, setError }: Section
   const [askWikiRetrieval, setAskWikiRetrieval] = useState<boolean>(() => localStorage.getItem(ASK_WIKI_RETRIEVAL_KEY) === '1')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [askLoading, setAskLoading] = useState(false)
+  const [modelStatus, setModelStatus] = useState<AskModelStatus | null>(null)
+  const [loadingModelStatus, setLoadingModelStatus] = useState(false)
+  const [switchingModelId, setSwitchingModelId] = useState<string | null>(null)
   const [renameThreadId, setRenameThreadId] = useState<number | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renamingThread, setRenamingThread] = useState(false)
@@ -89,6 +95,45 @@ export default function AskSection({ token, currentUsername, setError }: Section
     () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
     [threads, selectedThreadId],
   )
+  const activeModel = useMemo(
+    () => modelStatus?.models.find((model) => model.id === modelStatus.active_model_id) ?? null,
+    [modelStatus],
+  )
+  const desiredModel = useMemo(
+    () => modelStatus?.models.find((model) => model.id === modelStatus.desired_model_id) ?? null,
+    [modelStatus],
+  )
+  const activeSamplingPreset = askThinking ? modelStatus?.thinking_sampling : modelStatus?.fast_sampling
+  const modelReady = !modelStatus || !modelStatus.manager_enabled || modelStatus.state === 'ready'
+  const modelBusy = !!modelStatus?.manager_enabled && modelStatus.state === 'loading'
+
+  const loadModelStatus = useCallback(async (quiet = false) => {
+    if (!token) return
+    if (!quiet) setLoadingModelStatus(true)
+    try {
+      if (!quiet) setError('')
+      const data = await api<AskModelStatus>('/ask/models', {
+        headers: authHeaders(token),
+      })
+      setModelStatus(data)
+      if (data.state === 'ready' && (!switchingModelId || data.active_model_id === switchingModelId)) {
+        setSwitchingModelId(null)
+      }
+      if (data.state !== 'loading' && data.active_model_id === data.desired_model_id) {
+        setSwitchingModelId(null)
+      }
+    } catch (err) {
+      const message = errorMessage(err)
+      if (quiet) {
+        setModelStatus((prev) => prev ? { ...prev, state: 'error', last_error: message } : prev)
+        setSwitchingModelId(null)
+      } else {
+        setError(message)
+      }
+    } finally {
+      if (!quiet) setLoadingModelStatus(false)
+    }
+  }, [setError, switchingModelId, token])
 
   const loadThreads = useCallback(async (preferredThreadId?: number | null) => {
     if (!currentUsername || !token) return
@@ -131,6 +176,18 @@ export default function AskSection({ token, currentUsername, setError }: Section
       setLoadingMessages(false)
     }
   }, [currentUsername, setError, token])
+
+  useEffect(() => {
+    void loadModelStatus()
+  }, [loadModelStatus])
+
+  useEffect(() => {
+    if (!modelStatus?.manager_enabled || modelStatus.state !== 'loading') return
+    const intervalId = window.setInterval(() => {
+      void loadModelStatus(true)
+    }, 1500)
+    return () => window.clearInterval(intervalId)
+  }, [loadModelStatus, modelStatus])
 
   useEffect(() => {
     void loadThreads()
@@ -216,6 +273,15 @@ export default function AskSection({ token, currentUsername, setError }: Section
 
   const onAsk = async () => {
     if (!currentUsername || !token || askLoading) return
+    if (modelStatus?.manager_enabled && !modelReady) {
+      const label = desiredModel?.label ?? activeModel?.label ?? 'The selected model'
+      setError(
+        modelStatus.state === 'loading'
+          ? `${label} is still loading. Wait for the runtime to become ready.`
+          : modelStatus.last_error ?? 'The chat model is unavailable right now.',
+      )
+      return
+    }
     if (!askQuestion.trim()) {
       setError('Enter a question before sending.')
       return
@@ -394,6 +460,34 @@ export default function AskSection({ token, currentUsername, setError }: Section
     }
 
     setAskLoading(false)
+  }
+
+  const onSwitchModel = async (modelId: string) => {
+    if (!token || askLoading || loadingModelStatus) return
+    const targetModel = modelStatus?.models.find((model) => model.id === modelId)
+    if (targetModel && !targetModel.selectable) {
+      setError(targetModel.availability_reason ?? `${targetModel.label} is not selectable right now.`)
+      return
+    }
+    setLoadingModelStatus(true)
+    setSwitchingModelId(modelId)
+    try {
+      setError('')
+      const data = await api<AskModelStatus>('/ask/models/select', {
+        method: 'POST',
+        headers: authHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ model_id: modelId }),
+      })
+      setModelStatus(data)
+      if (data.state === 'ready') {
+        setSwitchingModelId(null)
+      }
+    } catch (err) {
+      setSwitchingModelId(null)
+      setError(errorMessage(err))
+    } finally {
+      setLoadingModelStatus(false)
+    }
   }
 
   return (
@@ -630,6 +724,128 @@ export default function AskSection({ token, currentUsername, setError }: Section
             borderRadius: 0,
           }}
         >
+          {modelStatus && (
+            <Box
+              sx={{
+                mb: 1.5,
+                p: 1.25,
+                borderRadius: 2,
+                border: 1,
+                borderColor: (t) => alpha(t.palette.primary.main, 0.18),
+                bgcolor: (t) => alpha(t.palette.primary.main, 0.05),
+              }}
+            >
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={1}
+                alignItems={{ xs: 'flex-start', md: 'center' }}
+                justifyContent="space-between"
+              >
+                <Box>
+                  <Typography variant="subtitle2">
+                    Shared local Qwen runtime
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Switching unloads the current Qwen model and loads the selected one for everyone using this server.
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                  <Chip
+                    size="small"
+                    label={
+                      modelStatus.state === 'loading'
+                        ? `Loading ${desiredModel?.label ?? 'model'}`
+                        : modelStatus.state === 'ready'
+                          ? `${activeModel?.label ?? 'Model'} ready`
+                          : modelStatus.state
+                    }
+                    color={modelStatus.state === 'ready' ? 'success' : modelStatus.state === 'loading' ? 'warning' : 'default'}
+                    variant={modelStatus.state === 'ready' ? 'filled' : 'outlined'}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={askThinking ? 'Thinking preset' : 'Fast preset'}
+                  />
+                  {modelStatus.max_tokens > 0 && (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`Max output ${modelStatus.max_tokens}`}
+                    />
+                  )}
+                </Stack>
+              </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.25 }}>
+                {modelStatus.models.map((model) => {
+                  const isActive = model.id === modelStatus.active_model_id
+                  const isTarget = model.id === modelStatus.desired_model_id
+                  const modelDetail = !model.available
+                    ? 'Model file not found'
+                    : !model.selectable
+                      ? 'Unavailable on the current memory budget'
+                      : isActive
+                        ? 'Active'
+                        : isTarget && modelBusy
+                          ? 'Queued to load'
+                          : `Context ${model.context_length}`
+                  const ramDetail = model.estimated_ram_mib && model.required_free_ram_mib
+                    ? `Est. RAM ${model.estimated_ram_mib} MiB · recommended free ${model.required_free_ram_mib} MiB`
+                    : null
+                  return (
+                    <Button
+                      key={model.id}
+                      variant={isActive ? 'contained' : 'outlined'}
+                      disabled={!model.selectable || askLoading || loadingModelStatus || (isActive && modelStatus.state === 'ready')}
+                      onClick={() => void onSwitchModel(model.id)}
+                      sx={{
+                        flex: 1,
+                        justifyContent: 'flex-start',
+                        alignItems: 'flex-start',
+                        textAlign: 'left',
+                        px: 1.25,
+                        py: 1,
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {model.label}
+                        </Typography>
+                        <Typography variant="caption" sx={{ display: 'block', opacity: 0.86 }}>
+                          {model.description}
+                        </Typography>
+                        <Typography variant="caption" sx={{ display: 'block', opacity: 0.7 }}>
+                          {modelDetail}
+                        </Typography>
+                        {ramDetail && (
+                          <Typography variant="caption" sx={{ display: 'block', opacity: 0.64 }}>
+                            {ramDetail}
+                          </Typography>
+                        )}
+                        {!model.selectable && model.availability_reason && (
+                          <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.25 }}>
+                            {model.availability_reason}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Button>
+                  )
+                })}
+              </Stack>
+              {(loadingModelStatus || modelBusy) && <LinearProgress sx={{ mt: 1 }} />}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                {activeSamplingPreset
+                  ? `Preset: T=${activeSamplingPreset.temperature} · top_p=${activeSamplingPreset.top_p} · top_k=${activeSamplingPreset.top_k} · presence=${activeSamplingPreset.presence_penalty}.`
+                  : 'Preset values load with the current model status.'}
+                {' '}Reasoning stays internal; only the final answer is kept in chat history.
+              </Typography>
+              {!!modelStatus.last_error && modelStatus.state === 'error' && (
+                <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.5 }}>
+                  {modelStatus.last_error}
+                </Typography>
+              )}
+            </Box>
+          )}
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
             <FormControlLabel
               control={
@@ -660,6 +876,9 @@ export default function AskSection({ token, currentUsername, setError }: Section
               }
             />
           </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Wiki Retrieval uses pages indexed from Wiki &gt; Indexed Articles.
+          </Typography>
           <Stack
             component="form"
             direction="row"
@@ -685,14 +904,18 @@ export default function AskSection({ token, currentUsername, setError }: Section
                   void onAsk()
                 }
               }}
-              helperText="Press Enter for newline. Press Ctrl/Cmd + Enter to send."
+              helperText={
+                modelStatus?.manager_enabled && !modelReady
+                  ? `Sending is disabled while ${desiredModel?.label ?? 'the selected model'} is loading.`
+                  : 'Press Enter for newline. Press Ctrl/Cmd + Enter to send.'
+              }
               size="small"
             />
             <Button
               color="primary"
               variant="contained"
               type="submit"
-              disabled={askLoading}
+              disabled={askLoading || (modelStatus?.manager_enabled ?? false) && !modelReady}
               startIcon={askLoading ? <CircularProgress size={16} color="inherit" /> : <SendIcon />}
             >
               Send

@@ -19,6 +19,7 @@ pub struct AppState {
     pub max_upload_bytes: usize,
     pub llama_embedding: Option<LlamaEmbeddingConfig>,
     pub llama_chat: Option<LlamaChatConfig>,
+    pub llama_model_manager: Option<LlamaModelManagerConfig>,
 }
 
 #[derive(Clone)]
@@ -45,6 +46,12 @@ pub struct LlamaChatConfig {
     pub default_thinking: bool,
 }
 
+#[derive(Clone)]
+pub struct LlamaModelManagerConfig {
+    pub url: String,
+    pub api_key: Option<String>,
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct QwenSamplingPreset {
     pub temperature: f32,
@@ -54,4 +61,28 @@ pub struct QwenSamplingPreset {
     pub presence_penalty: f32,
     pub repetition_penalty: f32,
     pub enable_thinking: bool,
+}
+
+pub fn qwen_sampling_preset(thinking: bool) -> QwenSamplingPreset {
+    if thinking {
+        QwenSamplingPreset {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            presence_penalty: 1.5,
+            repetition_penalty: 1.0,
+            enable_thinking: true,
+        }
+    } else {
+        QwenSamplingPreset {
+            temperature: 1.0,
+            top_p: 1.0,
+            top_k: 20,
+            min_p: 0.0,
+            presence_penalty: 2.0,
+            repetition_penalty: 1.0,
+            enable_thinking: false,
+        }
+    }
 }

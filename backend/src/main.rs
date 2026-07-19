@@ -5,6 +5,7 @@ mod db;
 mod drive;
 mod error;
 mod maps;
+mod model_control;
 mod notes;
 mod search;
 mod state;
@@ -35,7 +36,10 @@ use tower_http::{
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use state::{AppState, LLAMA_CHAT_TIMEOUT_SECS_DEFAULT, LlamaChatConfig, LlamaEmbeddingConfig};
+use state::{
+    AppState, LLAMA_CHAT_TIMEOUT_SECS_DEFAULT, LlamaChatConfig, LlamaEmbeddingConfig,
+    LlamaModelManagerConfig,
+};
 use utils::{build_cors, non_empty, parse_env_bool};
 
 #[tokio::main]
@@ -78,14 +82,15 @@ async fn main() -> anyhow::Result<()> {
     let llama_embed_model = std::env::var("LIFENODE_LLAMACPP_EMBED_MODEL")
         .unwrap_or_else(|_| "embeddinggemma-300M-Q8_0.gguf".to_string());
     let llama_chat_url = std::env::var("LIFENODE_LLAMACPP_CHAT_URL")
-        .unwrap_or_else(|_| "http://llama-qwen:8080/v1/chat/completions".to_string());
-    let llama_chat_model = std::env::var("LIFENODE_LLAMACPP_CHAT_MODEL")
-        .unwrap_or_else(|_| "Qwen3.5-0.8B-UD-Q3_K_XL.gguf".to_string());
+        .unwrap_or_else(|_| "http://llama-qwen:8081/v1/chat/completions".to_string());
+    let llama_chat_model = std::env::var("LIFENODE_LLAMACPP_CHAT_MODEL").unwrap_or_default();
+    let llama_manager_url = std::env::var("LIFENODE_LLAMACPP_MANAGER_URL")
+        .unwrap_or_else(|_| "http://llama-qwen:8080".to_string());
     let llama_api_key = std::env::var("LIFENODE_LLAMACPP_API_KEY")
         .ok()
         .and_then(|v| non_empty(v));
     let llama_chat_max_tokens: u32 = std::env::var("LIFENODE_LLAMACPP_CHAT_MAX_TOKENS")
-        .unwrap_or_else(|_| "1024".to_string())
+        .unwrap_or_else(|_| "2048".to_string())
         .parse()
         .context("LIFENODE_LLAMACPP_CHAT_MAX_TOKENS must be an integer")?;
     let llama_chat_timeout_secs: u64 = std::env::var("LIFENODE_LLAMACPP_CHAT_TIMEOUT_SECS")
@@ -138,10 +143,18 @@ async fn main() -> anyhow::Result<()> {
         Some(LlamaChatConfig {
             url: llama_chat_url.clone(),
             model: non_empty(llama_chat_model),
-            api_key: llama_api_key,
+            api_key: llama_api_key.clone(),
             max_tokens: llama_chat_max_tokens,
             timeout_secs: llama_chat_timeout_secs.max(10),
             default_thinking: llama_chat_default_thinking,
+        })
+    };
+    let llama_model_manager = if llama_manager_url.trim().is_empty() {
+        None
+    } else {
+        Some(LlamaModelManagerConfig {
+            url: llama_manager_url.clone(),
+            api_key: llama_api_key.clone(),
         })
     };
 
@@ -154,6 +167,9 @@ async fn main() -> anyhow::Result<()> {
         info!("llama.cpp chat enabled at {}", cfg.url);
     } else {
         warn!("llama.cpp chat disabled, using retrieval-only fallback answers");
+    }
+    if let Some(cfg) = &llama_model_manager {
+        info!("llama.cpp model manager enabled at {}", cfg.url);
     }
 
     let app_state = AppState {
@@ -168,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
         max_upload_bytes,
         llama_embedding,
         llama_chat,
+        llama_model_manager,
     };
 
     let cors = build_cors(&cors_origins_raw)?;
@@ -201,6 +218,8 @@ async fn main() -> anyhow::Result<()> {
             get(wiki::get_wiki_article),
         )
         .route("/search", post(search::semantic_search))
+        .route("/ask/models", get(model_control::get_chat_models))
+        .route("/ask/models/select", post(model_control::select_chat_model))
         .route("/ask", post(ask::ask_question))
         .route("/ask/stream", post(ask::ask_question_stream))
         .route("/maps/catalog", get(maps::maps_catalog))
@@ -337,5 +356,6 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "time": Utc::now().to_rfc3339(),
         "embedding_backend": embedding_backend,
         "llm_backend": llm_backend,
+        "chat_model_switching": state.llama_model_manager.is_some(),
     }))
 }

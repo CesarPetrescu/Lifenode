@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, type MouseEvent, type ReactElement } from 'react'
 import {
   Alert,
   AppBar,
@@ -16,14 +16,14 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Paper,
   Stack,
-  Switch,
-  Toolbar,
   Tooltip,
+  Toolbar,
   Typography,
   useMediaQuery,
 } from '@mui/material'
-import { useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles'
 import MenuIcon from '@mui/icons-material/Menu'
 import MapIcon from '@mui/icons-material/Map'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
@@ -41,16 +41,49 @@ import { ColorModeContext } from './themeContext'
 import type { AppSection, AuthResponse, AuthUser, HealthResponse } from './types'
 import { api, formatLocalDate } from './utils'
 import AuthScreen from './AuthScreen'
-import MapsSection from './MapsSection'
-import AskSection from './AskSection'
-import CalendarSection from './CalendarSection'
-import NotesSection from './NotesSection'
-import DriveSection from './DriveSection'
-import AdminSection from './AdminSection'
 
-const DRAWER_WIDTH = 272
+const DRAWER_WIDTH = 304
 const SECTION_QUERY_KEY = 'section'
 const ALLOWED_SECTIONS: AppSection[] = ['wiki', 'maps', 'ask', 'calendar', 'notes', 'drive', 'admin']
+
+const loadWikiWorkspaceSection = () => import('./WikiWorkspaceSection')
+const loadMapsSection = () => import('./MapsSection')
+const loadAskSection = () => import('./AskSection')
+const loadCalendarSection = () => import('./CalendarSection')
+const loadNotesSection = () => import('./NotesSection')
+const loadDriveSection = () => import('./DriveSection')
+const loadAdminSection = () => import('./AdminSection')
+
+const WikiWorkspaceSection = lazy(loadWikiWorkspaceSection)
+const MapsSection = lazy(loadMapsSection)
+const AskSection = lazy(loadAskSection)
+const CalendarSection = lazy(loadCalendarSection)
+const NotesSection = lazy(loadNotesSection)
+const DriveSection = lazy(loadDriveSection)
+const AdminSection = lazy(loadAdminSection)
+
+const SECTION_PRELOADERS: Record<AppSection, () => Promise<unknown>> = {
+  wiki: loadWikiWorkspaceSection,
+  maps: loadMapsSection,
+  ask: loadAskSection,
+  calendar: loadCalendarSection,
+  notes: loadNotesSection,
+  drive: loadDriveSection,
+  admin: loadAdminSection,
+}
+
+type NavigationItem = {
+  key: AppSection
+  label: string
+  eyebrow: string
+  description: string
+  navHint: string
+  icon: ReactElement
+}
+
+function preloadSection(section: AppSection) {
+  void SECTION_PRELOADERS[section]()
+}
 
 function isAppSection(value: string | null): value is AppSection {
   if (!value) return false
@@ -68,14 +101,47 @@ function buildSectionHref(next: AppSection): string {
   return `${url.pathname}?${url.searchParams.toString()}${url.hash}`
 }
 
+function SectionLoadingState({ label }: { label: string }) {
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        minHeight: 280,
+        display: 'grid',
+        placeItems: 'center',
+        borderRadius: 4,
+        background:
+          'linear-gradient(160deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.34) 100%)',
+      }}
+    >
+      <Stack spacing={1.2} alignItems="center">
+        <CircularProgress size={22} />
+        <Typography variant="subtitle1">{`Loading ${label}`}</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Preparing the workspace surface and its tools.
+        </Typography>
+      </Stack>
+    </Paper>
+  )
+}
+
 function App() {
   const theme = useTheme()
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
-  const colorMode = useContext(ColorModeContext)
   const isDark = theme.palette.mode === 'dark'
-  const shellBg = isDark ? 'rgba(10, 12, 18, 0.9)' : 'rgba(244, 247, 255, 0.92)'
-  const shellText = isDark ? 'rgba(236, 241, 255, 0.95)' : 'rgba(22, 29, 44, 0.95)'
-  const shellBorder = isDark ? 'rgba(160, 176, 214, 0.22)' : 'rgba(154, 166, 194, 0.38)'
+  const colorMode = useContext(ColorModeContext)
+
+  const shellBg = isDark ? alpha('#0d131d', 0.82) : alpha('#fffaf2', 0.88)
+  const shellPanelBg = isDark ? alpha(theme.palette.background.paper, 0.86) : alpha('#fffdf9', 0.94)
+  const shellText = theme.palette.text.primary
+  const shellBorder = alpha(theme.palette.text.primary, isDark ? 0.16 : 0.08)
+  const shellHover = alpha(theme.palette.primary.main, isDark ? 0.16 : 0.08)
+  const shellActive = alpha(theme.palette.primary.main, isDark ? 0.22 : 0.12)
+  const todayLabel = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date())
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [section, setSection] = useState<AppSection>(() => readSectionFromUrl() ?? 'wiki')
@@ -88,20 +154,80 @@ function App() {
 
   const currentUsername = authUser?.username ?? ''
 
-  const navigationItems = useMemo(
+  const navigationItems = useMemo<NavigationItem[]>(
     () => [
-      { key: 'wiki' as const, label: 'Wiki', icon: <AutoStoriesIcon /> },
-      { key: 'maps' as const, label: 'Maps', icon: <MapIcon /> },
-      { key: 'ask' as const, label: 'Ask', icon: <ChatIcon /> },
-      { key: 'calendar' as const, label: 'Calendar', icon: <EventNoteIcon /> },
-      { key: 'notes' as const, label: 'Notes', icon: <NoteAltIcon /> },
-      { key: 'drive' as const, label: 'Drive', icon: <FolderIcon /> },
+      {
+        key: 'wiki',
+        label: 'Wiki',
+        eyebrow: 'Knowledge',
+        description: 'Operate Kiwix libraries and indexed retrieval-ready Wikipedia content.',
+        navHint: 'Offline libraries + retrieval',
+        icon: <AutoStoriesIcon />,
+      },
+      {
+        key: 'maps',
+        label: 'Maps',
+        eyebrow: 'Navigation',
+        description: 'Download geographic datasets and inspect them in a focused offline viewer.',
+        navHint: 'Dataset downloads + OSM view',
+        icon: <MapIcon />,
+      },
+      {
+        key: 'ask',
+        label: 'Ask',
+        eyebrow: 'Assistant',
+        description: 'Run local chat workflows with thread history and optional wiki retrieval context.',
+        navHint: 'Local chat + retrieval',
+        icon: <ChatIcon />,
+      },
+      {
+        key: 'calendar',
+        label: 'Calendar',
+        eyebrow: 'Planning',
+        description: 'Track personal events without leaving the local workspace.',
+        navHint: 'Events and scheduling',
+        icon: <EventNoteIcon />,
+      },
+      {
+        key: 'notes',
+        label: 'Notes',
+        eyebrow: 'Writing',
+        description: 'Capture markdown notes in folders with editing and live preview side by side.',
+        navHint: 'Markdown workspace',
+        icon: <NoteAltIcon />,
+      },
+      {
+        key: 'drive',
+        label: 'Drive',
+        eyebrow: 'Storage',
+        description: 'Manage files, previews, downloads, and folders from the same authenticated shell.',
+        navHint: 'Files and previews',
+        icon: <FolderIcon />,
+      },
       ...(authUser?.is_admin
-        ? [{ key: 'admin' as const, label: 'Admin', icon: <AdminPanelSettingsIcon /> }]
+        ? [{
+            key: 'admin' as const,
+            label: 'Admin',
+            eyebrow: 'Operations',
+            description: 'Inspect users and access control settings for this LifeNode instance.',
+            navHint: 'Users and roles',
+            icon: <AdminPanelSettingsIcon />,
+          }]
         : []),
     ],
     [authUser?.is_admin],
   )
+
+  const currentSection = navigationItems.find((item) => item.key === section) ?? navigationItems[0]
+  const healthChipColor = health?.status === 'ok' ? 'success' : health ? 'warning' : 'default'
+  const healthLabel = health?.status === 'ok'
+    ? 'System healthy'
+    : health
+      ? 'Needs attention'
+      : 'Checking system'
+  const healthSummary = health
+    ? `${health.embedding_backend ?? 'Hash embeddings'} • ${health.llm_backend ?? 'Retrieval fallback'}`
+    : 'Checking backend and local model services'
 
   const updateSectionUrl = useCallback((next: AppSection, replace = false) => {
     const url = new URL(window.location.href)
@@ -152,6 +278,7 @@ function App() {
     setAuthUser(authData.user)
     localStorage.setItem('lifenode_token', authData.token)
     localStorage.setItem('lifenode_user', JSON.stringify(authData.user))
+    preloadSection(readSectionFromUrl() ?? 'wiki')
   }, [])
 
   useEffect(() => {
@@ -159,7 +286,9 @@ function App() {
       try {
         const data = await api<HealthResponse>('/health')
         setHealth(data)
-      } catch { /* ignore */ }
+      } catch {
+        // ignore
+      }
     })()
   }, [])
 
@@ -220,9 +349,8 @@ function App() {
   }, [section, updateSectionUrl])
 
   useEffect(() => {
-    const sectionTitle = navigationItems.find((item) => item.key === section)?.label ?? 'LifeNode'
-    document.title = `LifeNode · ${sectionTitle}`
-  }, [navigationItems, section])
+    document.title = `LifeNode · ${currentSection.label}`
+  }, [currentSection.label])
 
   const onLogout = async () => {
     if (token) {
@@ -241,72 +369,138 @@ function App() {
     setSectionWithUrl('wiki', true)
   }
 
-  // ── Auth loading ────────────────────────────────────────────────────
-
   if (authLoading) {
     return (
-      <Box sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center' }}>
-        <Stack direction="row" spacing={1.2} alignItems="center">
-          <CircularProgress size={24} />
-          <Typography>Loading LifeNode…</Typography>
-        </Stack>
+      <Box
+        sx={{
+          minHeight: '100dvh',
+          display: 'grid',
+          placeItems: 'center',
+          px: 2,
+        }}
+      >
+        <Paper variant="outlined" sx={{ px: 3, py: 2.25, borderRadius: 4 }}>
+          <Stack direction="row" spacing={1.2} alignItems="center">
+            <CircularProgress size={22} />
+            <Box>
+              <Typography variant="subtitle1">Loading LifeNode</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Restoring your workspace shell and session state.
+              </Typography>
+            </Box>
+          </Stack>
+        </Paper>
       </Box>
     )
   }
-
-  // ── Login / Register ────────────────────────────────────────────────
 
   if (!authUser || !token) {
     return <AuthScreen error={error} setError={setError} onAuth={onAuth} />
   }
 
-  // ── Drawer ──────────────────────────────────────────────────────────
-
   const drawerContent = (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ p: 2.2 }}>
-        <Typography variant="h6" sx={{ fontWeight: 700 }}>
-          LifeNode
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Command Center
-        </Typography>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: shellPanelBg }}>
+      <Box sx={{ p: 1.5 }}>
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 2.2,
+            borderRadius: 4,
+            position: 'relative',
+            overflow: 'hidden',
+            background: isDark
+              ? 'linear-gradient(165deg, rgba(24,34,48,0.98) 0%, rgba(13,19,29,0.98) 100%)'
+              : 'linear-gradient(165deg, rgba(255,252,246,0.98) 0%, rgba(246,240,231,0.98) 100%)',
+            '&::after': {
+              content: '""',
+              position: 'absolute',
+              width: 160,
+              height: 160,
+              borderRadius: '50%',
+              right: -58,
+              top: -72,
+              background: alpha(theme.palette.primary.main, isDark ? 0.18 : 0.12),
+            },
+          }}
+        >
+          <Chip size="small" color="primary" label="Local-first knowledge node" sx={{ mb: 1.5 }} />
+          <Typography variant="h5">LifeNode</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, maxWidth: 220 }}>
+            One private shell for offline knowledge, local AI, files, notes, maps, and planning.
+          </Typography>
+        </Paper>
       </Box>
-      <Divider />
-      <List component="nav" aria-label="Primary navigation" sx={{ pt: 0.5 }}>
+
+      <List component="nav" aria-label="Primary navigation" sx={{ px: 1, pb: 1 }}>
         {navigationItems.map((item) => (
-          <ListItem key={item.key} disablePadding>
+          <ListItem key={item.key} disablePadding sx={{ mb: 0.75 }}>
             <ListItemButton
               component="a"
               href={buildSectionHref(item.key)}
               aria-current={section === item.key ? 'page' : undefined}
               selected={section === item.key}
+              onMouseEnter={() => preloadSection(item.key)}
+              onFocus={() => preloadSection(item.key)}
               onClick={(event: MouseEvent<HTMLAnchorElement>) => onSectionNavClick(event, item.key)}
               sx={{
-                mx: 1,
-                mb: 0.5,
-                borderRadius: 1.5,
+                alignItems: 'flex-start',
+                px: 1.25,
+                py: 1.15,
+                borderRadius: 3,
+                border: '1px solid',
+                borderColor: section === item.key ? alpha(theme.palette.primary.main, 0.28) : 'transparent',
+                bgcolor: section === item.key ? shellActive : 'transparent',
+                '&:hover': {
+                  bgcolor: shellHover,
+                },
+                '& .MuiListItemIcon-root': {
+                  minWidth: 40,
+                  mt: 0.2,
+                  color: section === item.key ? 'primary.main' : 'text.secondary',
+                },
               }}
             >
               <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.label} />
+              <ListItemText
+                primary={item.label}
+                secondary={item.navHint}
+                primaryTypographyProps={{ fontWeight: 700 }}
+                secondaryTypographyProps={{
+                  sx: {
+                    color: 'text.secondary',
+                    lineHeight: 1.35,
+                    mt: 0.15,
+                  },
+                }}
+              />
             </ListItemButton>
           </ListItem>
         ))}
       </List>
+
       <Box sx={{ flexGrow: 1 }} />
       <Divider />
-      <Box sx={{ px: 2, py: 1.5 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Stack direction="row" alignItems="center" spacing={1}>
-            {isDark ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}
-            <Typography variant="body2">{isDark ? 'Dark' : 'Light'}</Typography>
-          </Stack>
-          <Switch size="small" checked={isDark} onChange={colorMode.toggleColorMode} />
-        </Stack>
-      </Box>
-      <Divider />
       <Box sx={{ p: 1.5 }}>
+        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 3, mb: 1.25 }}>
+          <Typography variant="caption" color="text.secondary">
+            Signed in as
+          </Typography>
+          <Typography variant="subtitle1" sx={{ mt: 0.2 }}>
+            {authUser.username}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', rowGap: 1 }}>
+            <Chip
+              size="small"
+              color={authUser.is_admin ? 'secondary' : 'default'}
+              label={authUser.is_admin ? 'Admin access' : 'Personal workspace'}
+            />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={health ? `Synced ${formatLocalDate(health.time)}` : 'Health check pending'}
+            />
+          </Stack>
+        </Paper>
         <Button fullWidth variant="outlined" color="inherit" startIcon={<LogoutIcon />} onClick={onLogout}>
           Sign Out
         </Button>
@@ -314,13 +508,11 @@ function App() {
     </Box>
   )
 
-  // ── Section content ─────────────────────────────────────────────────
-
   const sectionProps = { token, currentUsername, setError }
 
   const renderSectionContent = () => {
     const content = (() => {
-      if (section === 'wiki') return <MapsSection {...sectionProps} mode="kiwix" />
+      if (section === 'wiki') return <WikiWorkspaceSection {...sectionProps} />
       if (section === 'maps') return <MapsSection {...sectionProps} mode="osm" />
       if (section === 'ask') return <AskSection {...sectionProps} />
       if (section === 'calendar') return <CalendarSection {...sectionProps} />
@@ -330,74 +522,100 @@ function App() {
     })()
 
     return (
-      <Fade in key={section} timeout={250}>
-        <div>{content}</div>
-      </Fade>
+      <Suspense fallback={<SectionLoadingState label={currentSection.label} />}>
+        <Fade in key={section} timeout={250}>
+          <div>{content}</div>
+        </Fade>
+      </Suspense>
     )
   }
-
-  // ── Main app ────────────────────────────────────────────────────────
 
   return (
     <Box
       sx={{
         minHeight: '100dvh',
-        bgcolor: isDark ? '#0d1018' : '#eef2fb',
-        backgroundImage: isDark
-          ? 'radial-gradient(circle at 10% 0%, rgba(68,94,159,0.16), transparent 42%)'
-          : 'radial-gradient(circle at 10% 0%, rgba(83,110,183,0.22), transparent 45%)',
+        position: 'relative',
+        bgcolor: 'background.default',
+        color: shellText,
+        overflow: 'hidden',
+        '&::before': {
+          content: '""',
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          backgroundImage:
+            isDark
+              ? 'radial-gradient(circle at 8% 0%, rgba(122,162,255,0.14), transparent 24%), radial-gradient(circle at 92% 10%, rgba(79,209,197,0.12), transparent 18%)'
+              : 'radial-gradient(circle at 8% 0%, rgba(29,78,216,0.13), transparent 24%), radial-gradient(circle at 92% 10%, rgba(194,65,12,0.09), transparent 18%)',
+        },
       }}
     >
       <a href="#main-content" className="skip-link">Skip to content</a>
+
       <AppBar position="fixed" color="transparent" elevation={0}>
         <Toolbar
           sx={{
+            minHeight: 64,
+            gap: 1.25,
             borderBottom: 1,
             borderColor: shellBorder,
             bgcolor: shellBg,
             color: shellText,
-            backdropFilter: 'blur(10px)',
+            backdropFilter: 'blur(16px)',
           }}
         >
           <IconButton
             aria-label="Open navigation menu"
             onClick={() => setDrawerOpen(true)}
-            sx={{ mr: 1, display: { md: 'none' } }}
+            sx={{ display: { md: 'none' } }}
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h5" component="h1" sx={{ flexGrow: 1, fontWeight: 700 }}>
-            LifeNode
-          </Typography>
+
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography variant="caption" color="text.secondary">
+              LifeNode / {currentSection.eyebrow}
+            </Typography>
+            <Typography variant="h6" noWrap>
+              {currentSection.label}
+            </Typography>
+          </Box>
+
+          <Chip
+            size="small"
+            variant="outlined"
+            label={todayLabel}
+            sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
+          />
 
           <Tooltip
             title={
               health
                 ? `${health.status.toUpperCase()} | ${health.embedding_backend ?? 'No embeddings'} | ${health.llm_backend ?? 'No LLM'} | ${formatLocalDate(health.time)}`
-                : 'Checking backend…'
+                : 'Checking backend and local services'
             }
           >
-            <FiberManualRecordIcon
-              aria-label={health?.status === 'ok' ? 'Backend healthy' : 'Backend status unknown'}
-              sx={{
-                fontSize: 12,
-                mr: 1.5,
-                color: health?.status === 'ok' ? 'success.main' : 'warning.main',
-              }}
+            <Chip
+              size="small"
+              color={healthChipColor}
+              variant={health?.status === 'ok' ? 'filled' : 'outlined'}
+              icon={<FiberManualRecordIcon sx={{ fontSize: '0.72rem !important' }} />}
+              label={healthLabel}
             />
           </Tooltip>
 
           <Chip
-            label={authUser.username}
             size="small"
             variant="outlined"
-            sx={{ mr: 1 }}
+            label={authUser.is_admin ? `${authUser.username} · Admin` : authUser.username}
+            sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
           />
-          <Chip
-            label={authUser.is_admin ? 'Admin' : 'User'}
-            color={authUser.is_admin ? 'secondary' : 'default'}
-            size="small"
-          />
+
+          <Tooltip title={`Switch to ${isDark ? 'light' : 'dark'} mode`}>
+            <IconButton onClick={colorMode.toggleColorMode} aria-label="Toggle color mode">
+              {isDark ? <LightModeIcon /> : <DarkModeIcon />}
+            </IconButton>
+          </Tooltip>
         </Toolbar>
       </AppBar>
 
@@ -415,10 +633,10 @@ function App() {
               boxSizing: 'border-box',
               borderRight: 1,
               borderColor: shellBorder,
-              bgcolor: shellBg,
-              color: shellText,
-              mt: { xs: '64px', md: '64px' },
-              height: { xs: 'calc(100% - 64px)', md: 'calc(100% - 64px)' },
+              bgcolor: shellPanelBg,
+              mt: '64px',
+              height: 'calc(100% - 64px)',
+              backdropFilter: 'blur(18px)',
             },
           }}
         >
@@ -432,12 +650,70 @@ function App() {
           sx={{
             flexGrow: 1,
             minWidth: 0,
-            pt: '76px',
+            pt: '84px',
             px: { xs: 1.5, md: 3 },
-            pb: 3,
+            pb: 4,
           }}
         >
-          <Container maxWidth="xl">
+          <Container maxWidth="xl" sx={{ position: 'relative' }}>
+            <Paper
+              variant="outlined"
+              sx={{
+                mb: 2.5,
+                p: { xs: 2.2, md: 3 },
+                borderRadius: 4,
+                position: 'relative',
+                overflow: 'hidden',
+                background: isDark
+                  ? 'linear-gradient(160deg, rgba(24,34,48,0.96) 0%, rgba(13,19,29,0.98) 100%)'
+                  : 'linear-gradient(160deg, rgba(255,253,249,0.98) 0%, rgba(246,240,231,0.98) 100%)',
+                '&::after': {
+                  content: '""',
+                  position: 'absolute',
+                  width: 280,
+                  height: 280,
+                  borderRadius: '50%',
+                  right: -140,
+                  top: -160,
+                  background: alpha(theme.palette.primary.main, isDark ? 0.16 : 0.12),
+                },
+              }}
+            >
+              <Stack
+                direction={{ xs: 'column', xl: 'row' }}
+                justifyContent="space-between"
+                spacing={2}
+                sx={{ position: 'relative', zIndex: 1 }}
+              >
+                <Box sx={{ maxWidth: 760 }}>
+                  <Typography variant="overline" color="text.secondary">
+                    {currentSection.eyebrow}
+                  </Typography>
+                  <Typography variant="h3" sx={{ mt: 0.3 }}>
+                    {currentSection.label}
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ mt: 1.1, maxWidth: 720 }}>
+                    {currentSection.description}
+                  </Typography>
+                </Box>
+
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignSelf: 'flex-start' }}>
+                  <Chip
+                    size="small"
+                    color={authUser.is_admin ? 'secondary' : 'default'}
+                    label={authUser.is_admin ? 'Admin privileges enabled' : 'Personal workspace'}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={healthChipColor}
+                    label={health ? `Backend ${health.status}` : 'Backend check pending'}
+                  />
+                  <Chip size="small" variant="outlined" label={healthSummary} />
+                </Stack>
+              </Stack>
+            </Paper>
+
             <Box role="status" aria-live="polite" aria-atomic="true">
               {error && (
                 <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>

@@ -70,6 +70,34 @@ export type AskSampling = {
   enable_thinking: boolean
 }
 
+export type AskModel = {
+  id: string
+  label: string
+  filename: string
+  context_length: number
+  description: string
+  available: boolean
+  selectable: boolean
+  availability_reason?: string | null
+  estimated_ram_mib?: number | null
+  required_free_ram_mib?: number | null
+}
+
+export type AskModelStatus = {
+  manager_enabled: boolean
+  switchable: boolean
+  shared_runtime: boolean
+  state: string
+  active_model_id?: string | null
+  desired_model_id?: string | null
+  last_error?: string | null
+  models: AskModel[]
+  fast_sampling: AskSampling
+  thinking_sampling: AskSampling
+  default_thinking: boolean
+  max_tokens: number
+}
+
 export type AskThread = {
   id: number
   title: string
